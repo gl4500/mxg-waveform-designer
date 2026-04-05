@@ -1614,6 +1614,12 @@ class WaveformGUI:
         self._vars['file_name'] = tk.StringVar(value='mxg_waveform')
         ttk.Entry(f, textvariable=self._vars['file_name'], width=28
                   ).grid(row=1, column=1, sticky='ew', pady=2)
+        ttk.Button(f, text='Auto-name',
+                   command=self._apply_auto_name).grid(row=1, column=2, padx=4)
+
+        ttk.Label(f, text='Auto-name uses: types_Nch_fsMHz_pwus_Npri_timestamp',
+                  foreground='grey').grid(row=2, column=0, columnspan=3,
+                                          sticky='w', pady=(0, 4))
 
         # Save format checkboxes
         self._vars['save_mat'] = tk.BooleanVar(value=True)
@@ -1621,40 +1627,40 @@ class WaveformGUI:
         self._vars['save_bin'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text='Save .MAT',
                         variable=self._vars['save_mat']
-                        ).grid(row=2, column=0, sticky='w')
+                        ).grid(row=4, column=0, sticky='w')
         ttk.Checkbutton(f, text='Save .CSV',
                         variable=self._vars['save_csv']
-                        ).grid(row=3, column=0, sticky='w')
+                        ).grid(row=5, column=0, sticky='w')
         ttk.Checkbutton(f, text='Save .BIN  (int16 big-endian I/Q for MXG)',
                         variable=self._vars['save_bin']
-                        ).grid(row=4, column=0, columnspan=3, sticky='w')
+                        ).grid(row=6, column=0, columnspan=3, sticky='w')
 
         # BIN size limit
         sep = ttk.Separator(f, orient='horizontal')
-        sep.grid(row=5, column=0, columnspan=3, sticky='ew', pady=8)
+        sep.grid(row=7, column=0, columnspan=3, sticky='ew', pady=8)
 
         ttk.Label(f, text='MXG BIN limit (MB)').grid(
-            row=6, column=0, sticky='w', pady=2)
+            row=8, column=0, sticky='w', pady=2)
         self._vars['max_bin_mb'] = tk.StringVar(value='4')
         ttk.Entry(f, textvariable=self._vars['max_bin_mb'], width=10
-                  ).grid(row=6, column=1, sticky='w', pady=2)
+                  ).grid(row=8, column=1, sticky='w', pady=2)
         ttk.Label(f, text='  always produces full + resampled pair', foreground='grey'
-                  ).grid(row=6, column=2, sticky='w')
+                  ).grid(row=8, column=2, sticky='w')
 
         self._vars['save_vsa89600'] = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text='Save 89600 VSA .mat  (Keysight VSA import)',
                         variable=self._vars['save_vsa89600']
-                        ).grid(row=7, column=0, columnspan=3, sticky='w')
+                        ).grid(row=9, column=0, columnspan=3, sticky='w')
 
         self._vars['save_m_script'] = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text='Save MATLAB .m script  (load + SCPI download)',
                         variable=self._vars['save_m_script']
-                        ).grid(row=8, column=0, columnspan=3, sticky='w')
+                        ).grid(row=10, column=0, columnspan=3, sticky='w')
 
         self._vars['show_plots'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text='Show diagnostic plots',
                         variable=self._vars['show_plots']
-                        ).grid(row=9, column=0, columnspan=3, sticky='w', pady=(4, 0))
+                        ).grid(row=11, column=0, columnspan=3, sticky='w', pady=(4, 0))
 
     def _tab_scpi(self, nb):
         """SCPI / PyVISA direct-download tab."""
@@ -1941,6 +1947,61 @@ class WaveformGUI:
             ttk.Entry(self._extra_frame, textvariable=var, width=14
                       ).grid(row=i, column=1, sticky='w', pady=2)
 
+    # ── auto-name ─────────────────────────────────────────────────────────────
+
+    def _auto_filename(self) -> str:
+        """
+        Build a descriptive file stem from the current GUI parameters.
+
+        Format:  {types}_{N}ch_{fs}MHz_{pw}us_{npri}pri_{YYYYMMDD_HHMMSS}
+
+        Examples:
+          LFM_40ch_125MHz_1000us_20pri_20260405_143211
+          LFM+BPSK_44ch_100MHz_500us_10pri_20260405_150022
+          NLFM-tangent_8ch_80MHz_250us_5pri_20260405_161533
+        """
+        # Waveform types from all current banks
+        if self._channel_banks:
+            seen, parts = set(), []
+            for b in self._channel_banks:
+                wt = b['waveform_type']
+                if wt not in seen:
+                    seen.add(wt)
+                    # Append NLFM law suffix if applicable
+                    if wt == 'NLFM':
+                        law = b.get('extra', {}).get('law', 'tangent')
+                        parts.append(f'NLFM-{law}')
+                    else:
+                        parts.append(wt)
+            type_str = '+'.join(parts)
+            n_ch = sum(b['n_channels'] for b in self._channel_banks)
+        else:
+            type_str = self._vars.get('waveform_type',
+                                      tk.StringVar(value='LFM')).get()
+            try:
+                n_ch = int(float(self._vars['n_channels'].get()))
+            except (ValueError, KeyError):
+                n_ch = 0
+
+        try:
+            fs_mhz = float(self._vars['fs_mhz'].get())
+            pw_us  = float(self._vars['pw_us'].get())
+            npri   = int(float(self._vars['num_pulses'].get()))
+        except (ValueError, KeyError):
+            fs_mhz, pw_us, npri = 0.0, 0.0, 0
+
+        ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # Sanitise: replace characters that are illegal in Windows filenames
+        type_str = type_str.replace('/', '-').replace('\\', '-')
+
+        return (f'{type_str}_{n_ch}ch_{fs_mhz:.0f}MHz_'
+                f'{pw_us:.0f}us_{npri}pri_{ts}')
+
+    def _apply_auto_name(self):
+        """Populate the file name field with the generated auto-name."""
+        self._vars['file_name'].set(self._auto_filename())
+
     def _browse_folder(self):
         folder = filedialog.askdirectory(
             initialdir=self._vars['out_dir'].get(),
@@ -1986,6 +2047,13 @@ class WaveformGUI:
         except ValueError as e:
             messagebox.showerror('Channel error', str(e))
             return
+
+        # If the name is still the bare default, auto-generate to avoid overwrites
+        if p['file_name'].strip() in ('', 'mxg_waveform'):
+            auto = self._auto_filename()
+            self._vars['file_name'].set(auto)
+            p['file_name'] = auto
+            cfg.base_file_name = os.path.join(p['out_dir'], auto)
 
         # Disable the button and show status while the build runs
         self._build_btn.config(state='disabled', text='Building…')

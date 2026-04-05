@@ -7,6 +7,18 @@
 
 ## Released
 
+### [v1.15] 2026-04-05 — Auto-generated file names from waveform parameters
+- Output tab now has an **Auto-name** button next to the file name field.
+- Clicking it populates the field with a descriptive stem:
+  `{types}_{N}ch_{fs}MHz_{pw}us_{npri}pri_{YYYYMMDD_HHMMSS}`
+  e.g. `LFM_40ch_125MHz_1000us_20pri_20260405_143211`
+  or   `LFM+BPSK_44ch_100MHz_500us_10pri_20260405_150022`
+- If the file name is still the bare default (`mxg_waveform`) when Build is clicked,
+  the name is auto-generated automatically — no silent overwrites.
+- NLFM banks append the law suffix: `NLFM-tangent`, `NLFM-cosine`, `NLFM-hamming`.
+- Mixed-bank composites join type names with `+`: `LFM+STEPPED+FRANK`.
+- Timestamp in the stem guarantees every build produces a unique set of files.
+
 ### [v1.14] 2026-04-05 — Fix: figure windows frozen/unmoveable
 - `plt.show()` → `plt.show(block=False)` in `WaveformPlotter.plot_all()`.
 - Root cause: blocking `plt.show()` called inside tkinter's mainloop via `root.after()`
