@@ -684,34 +684,74 @@ class WaveformPlotter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class WaveformExporter:
-    """Saves normalised IQ waveform to .MAT / .CSV / .BIN."""
+    """
+    Saves normalised IQ waveform to .MAT / .CSV / .BIN.
+
+    Two .BIN files are always produced when save_bin is True:
+      {base}_full.bin        – full resolution, original sample rate
+      {base}_mxg_4mb.bin     – resampled to fit ≤ 4 MB for MXG download limit
+
+    A companion .txt sidecar is written next to the 4 MB file recording
+    the resampled sample rate to set on the MXG.
+    """
+
+    MXG_LIMIT_MB = 4.0   # MXG download size limit
 
     def save_all(self, iq: np.ndarray, config: CompositeConfig,
                  channel_table: pd.DataFrame, max_bin_mb: float = 0.0):
         """
         Save all enabled formats.
 
-        max_bin_mb : if > 0, the .BIN is resampled down so it fits within
-                     that many megabytes.  0 = no limit.
+        max_bin_mb : override the default 4 MB MXG limit if needed (0 = use default).
         """
-        I = np.real(iq).astype(np.float64)
-        Q = np.imag(iq).astype(np.float64)
+        I    = np.real(iq).astype(np.float64)
+        Q    = np.imag(iq).astype(np.float64)
         base = config.base_file_name
+        limit_mb = max_bin_mb if max_bin_mb > 0 else self.MXG_LIMIT_MB
 
         if config.save_mat:
             self._save_mat(base, iq, I, Q, config, channel_table)
         if config.save_csv:
             self._save_csv(base, I, Q, channel_table)
         if config.save_bin:
-            iq_bin, fs_bin = resample_to_max_mb(iq, config.fs, max_bin_mb)
-            self._save_bin(base, np.real(iq_bin), np.imag(iq_bin))
+            # ── File 1: full resolution ──────────────────────────────────────
+            self._save_bin(f'{base}_full', I, Q)
+            full_mb = os.path.getsize(f'{base}_full.bin') / 1e6
 
-        print('Files written:')
-        if config.save_mat: print(f'  {base}.mat')
-        if config.save_csv: print(f'  {base}.csv  |  {base}_channel_table.csv')
+            # ── File 2: resampled to MXG limit ───────────────────────────────
+            iq_small, fs_small = resample_to_max_mb(iq, config.fs, limit_mb)
+            I_s = np.real(iq_small).astype(np.float64)
+            Q_s = np.imag(iq_small).astype(np.float64)
+            self._save_bin(f'{base}_mxg_{int(limit_mb)}mb', I_s, Q_s)
+            small_mb = os.path.getsize(f'{base}_mxg_{int(limit_mb)}mb.bin') / 1e6
+
+            # ── Sidecar: MXG sample rate note ────────────────────────────────
+            sidecar = f'{base}_mxg_{int(limit_mb)}mb_info.txt'
+            with open(sidecar, 'w') as f:
+                f.write(f'MXG waveform file info\n')
+                f.write(f'======================\n')
+                f.write(f'File          : {base}_mxg_{int(limit_mb)}mb.bin\n')
+                f.write(f'File size     : {small_mb:.2f} MB\n')
+                f.write(f'Samples       : {len(iq_small):,}\n')
+                f.write(f'Sample rate   : {fs_small/1e6:.6f} MHz\n')
+                f.write(f'  *** Set this sample rate on the MXG ***\n')
+                f.write(f'Original fs   : {config.fs/1e6:.6f} MHz\n')
+                f.write(f'Downsample    : {config.fs/fs_small:.4f}x\n')
+                f.write(f'Format        : interleaved float32 I/Q (I0,Q0,I1,Q1,...)\n')
+
+        print('\nFiles written:')
+        if config.save_mat:
+            mat_mb = os.path.getsize(f'{base}.mat') / 1e6
+            print(f'  {base}.mat  ({mat_mb:.1f} MB)')
+        if config.save_csv:
+            print(f'  {base}.csv')
+            print(f'  {base}_channel_table.csv')
         if config.save_bin:
-            mb = os.path.getsize(f'{base}.bin') / 1e6
-            print(f'  {base}.bin  ({mb:.2f} MB, interleaved float32 I/Q)')
+            print(f'  {base}_full.bin            ({full_mb:.2f} MB)  '
+                  f'@ {config.fs/1e6:.3f} MHz  – archive / full resolution')
+            print(f'  {base}_mxg_{int(limit_mb)}mb.bin   ({small_mb:.2f} MB)  '
+                  f'@ {fs_small/1e6:.3f} MHz  – load this onto MXG')
+            print(f'  {base}_mxg_{int(limit_mb)}mb_info.txt  – MXG sample rate note')
 
     # ── format writers ───────────────────────────────────────────────────────
 
@@ -1005,12 +1045,12 @@ class WaveformGUI:
         sep = ttk.Separator(f, orient='horizontal')
         sep.grid(row=5, column=0, columnspan=3, sticky='ew', pady=8)
 
-        ttk.Label(f, text='Max .BIN size (MB)').grid(
+        ttk.Label(f, text='MXG BIN limit (MB)').grid(
             row=6, column=0, sticky='w', pady=2)
-        self._vars['max_bin_mb'] = tk.StringVar(value='0')
+        self._vars['max_bin_mb'] = tk.StringVar(value='4')
         ttk.Entry(f, textvariable=self._vars['max_bin_mb'], width=10
                   ).grid(row=6, column=1, sticky='w', pady=2)
-        ttk.Label(f, text='  (0 = no limit, e.g. 4)', foreground='grey'
+        ttk.Label(f, text='  always produces full + resampled pair', foreground='grey'
                   ).grid(row=6, column=2, sticky='w')
 
         self._vars['show_plots'] = tk.BooleanVar(value=True)
