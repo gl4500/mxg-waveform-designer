@@ -806,6 +806,9 @@ class WaveformExporter:
         base = config.base_file_name
         limit_mb = max_bin_mb if max_bin_mb > 0 else self.MXG_LIMIT_MB
 
+        # Ensure the output directory exists (params/ subfolder)
+        os.makedirs(os.path.dirname(os.path.abspath(base)), exist_ok=True)
+
         # Always save parameters first so the build is reproducible
         self._save_params(base, config, channels, iq, limit_mb)
 
@@ -840,7 +843,7 @@ class WaveformExporter:
                 f.write(f'Format        : interleaved int16 big-endian I/Q (I0,Q0,I1,Q1,...) scaled ±32767\n')
 
         print('\nFiles written:')
-        print(f'  params/{os.path.basename(base)}_params.json  – full waveform parameters (auto-saved)')
+        print(f'  {os.path.basename(base)}_params.json  – full waveform parameters (auto-saved)')
         if config.save_mat:
             mat_mb = os.path.getsize(f'{base}.mat') / 1e6
             print(f'  {base}.mat  ({mat_mb:.1f} MB)')
@@ -945,12 +948,11 @@ class WaveformExporter:
             },
         }
 
-        # Save into  <output_dir>/params/<stem>_params.json
-        out_dir    = os.path.dirname(os.path.abspath(base)) if os.path.dirname(base) else '.'
-        params_dir = os.path.join(out_dir, 'params')
-        os.makedirs(params_dir, exist_ok=True)
+        # Save alongside all other output files — base already points into params/
+        out_dir = os.path.dirname(os.path.abspath(base)) if os.path.dirname(base) else '.'
+        os.makedirs(out_dir, exist_ok=True)
         stem = os.path.basename(base)
-        path = os.path.join(params_dir, f'{stem}_params.json')
+        path = os.path.join(out_dir, f'{stem}_params.json')
         with open(path, 'w', encoding='utf-8') as fh:
             json.dump(doc, fh, indent=2)
 
@@ -2034,7 +2036,7 @@ class WaveformGUI:
             taylor_nbar      = p['taylor_nbar'],
             taylor_sll       = p['taylor_sll'],
             final_peak_scale = p['peak_scale'],
-            base_file_name   = os.path.join(p['out_dir'], p['file_name']),
+            base_file_name   = os.path.join(p['out_dir'], 'params', p['file_name']),
             save_mat         = p['save_mat'],
             save_csv         = p['save_csv'],
             save_bin         = p['save_bin'],

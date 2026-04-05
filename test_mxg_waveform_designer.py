@@ -416,8 +416,10 @@ class TestExportHelpers:
 class TestParamsSave:
 
     def _build(self, tmp_path):
+        # base_file_name already points into params/ (mirrors GUI behaviour)
+        params_dir = tmp_path / 'params'
         cfg      = _simple_cfg(
-            base_file_name=str(tmp_path / 'test_wfm'),
+            base_file_name=str(params_dir / 'test_wfm'),
             save_bin=False, save_mat=False, save_csv=False,
         )
         channels = _simple_channels(4)
@@ -431,6 +433,7 @@ class TestParamsSave:
 
     def test_params_file_exists(self, tmp_path):
         self._build(tmp_path)
+        # params JSON is flat inside params/ — no nested subfolder
         assert os.path.isfile(tmp_path / 'params' / 'test_wfm_params.json')
 
     def test_params_json_keys(self, tmp_path):
@@ -454,21 +457,22 @@ class TestParamsSave:
         params_path = str(tmp_path / 'params' / 'test_wfm_params.json')
         cfg2, chs2 = load_params(params_path)
 
-        assert cfg2.fs           == cfg_orig.fs
-        assert cfg2.num_pulses   == cfg_orig.num_pulses
+        assert cfg2.fs            == cfg_orig.fs
+        assert cfg2.num_pulses    == cfg_orig.num_pulses
         assert cfg2.pulse_width_s == cfg_orig.pulse_width_s
-        assert len(chs2)         == len(chs_orig)
+        assert len(chs2)          == len(chs_orig)
         assert chs2[0].waveform_type == chs_orig[0].waveform_type
 
     def test_params_saved_each_unique_build(self, tmp_path):
         """Two builds with different file names produce two separate param files."""
+        params_dir = tmp_path / 'params'
         for name in ('build_a', 'build_b'):
             cfg = _simple_cfg(
-                base_file_name=str(tmp_path / name),
+                base_file_name=str(params_dir / name),
                 save_bin=False, save_mat=False, save_csv=False,
             )
             chs = _simple_channels(2)
             iq, tbl = CompositeBuilder(cfg, chs).build()
             WaveformExporter().save_all(iq, cfg, chs, tbl)
-        files = list((tmp_path / 'params').iterdir())
+        files = [f for f in params_dir.iterdir() if f.suffix == '.json']
         assert len(files) == 2

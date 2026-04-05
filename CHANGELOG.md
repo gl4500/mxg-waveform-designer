@@ -7,6 +7,14 @@
 
 ## Released
 
+### [v1.16] 2026-04-05 — All output files saved directly into params/ folder
+- `base_file_name` now points into `<output_dir>/params/<stem>` so every file
+  produced by a build (`.bin`, `.mat`, `.csv`, `_info.txt`, `_scpi.txt`,
+  `_params.json`, `_vsa89600.mat`, `_load.m`) lands in the same `params/` folder.
+- No more scattered files in the root output directory.
+- `save_all()` calls `os.makedirs(..., exist_ok=True)` before the first write.
+- `_save_params()` no longer creates a nested `params/params/` layer.
+
 ### [v1.15] 2026-04-05 — Auto-generated file names from waveform parameters
 - Output tab now has an **Auto-name** button next to the file name field.
 - Clicking it populates the field with a descriptive stem:
