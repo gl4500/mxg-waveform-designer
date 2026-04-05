@@ -651,7 +651,11 @@ class WaveformPlotter:
         self._plot_time_domain(one_pri, t_pri, title_prefix)
         self._plot_spectrum(iq, channels, title_prefix)
         self._plot_spectrogram(iq, channels, title_prefix)
-        plt.show()
+        # block=False: hand event processing back to tkinter's mainloop so
+        # figure windows are moveable, resizable, and interactive alongside
+        # the designer GUI.  A blocking plt.show() would starve tkinter's
+        # event loop and freeze all windows in place.
+        plt.show(block=False)
 
     # ── individual plots ─────────────────────────────────────────────────────
 
