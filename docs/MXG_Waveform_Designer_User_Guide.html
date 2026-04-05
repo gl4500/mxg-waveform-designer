@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MXG Waveform Designer — User Guide</title>
+<style>
+  :root {
+    --accent: #1a5276;
+    --accent2: #2e86c1;
+    --light: #eaf4fb;
+    --border: #aed6f1;
+    --warn: #d35400;
+    --ok: #1e8449;
+    --code-bg: #f4f6f7;
+    --text: #1c2833;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+    background: #fff;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--accent);
+    color: #fff;
+    padding: 32px 32px 24px;
+    border-radius: 6px;
+    margin-bottom: 36px;
+  }
+  header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
+  header p  { font-size: 1rem; opacity: 0.85; margin-top: 6px; }
+  header .version {
+    display: inline-block;
+    background: rgba(255,255,255,0.2);
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    margin-top: 10px;
+  }
+
+  /* ── Sections ── */
+  h2 {
+    font-size: 1.35rem;
+    color: var(--accent);
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 6px;
+    margin: 40px 0 16px;
+  }
+  h3 {
+    font-size: 1.05rem;
+    color: var(--accent2);
+    margin: 24px 0 10px;
+    font-weight: 600;
+  }
+  h4 {
+    font-size: 0.95rem;
+    color: var(--text);
+    margin: 18px 0 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  p { margin-bottom: 12px; }
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 20px;
+    font-size: 0.93rem;
+  }
+  th {
+    background: var(--accent);
+    color: #fff;
+    padding: 9px 12px;
+    text-align: left;
+    font-weight: 600;
+  }
+  td { padding: 8px 12px; border-bottom: 1px solid #d5e8f5; vertical-align: top; }
+  tr:nth-child(even) td { background: var(--light); }
+  td:first-child { font-weight: 600; white-space: nowrap; color: var(--accent); }
+
+  /* ── Code ── */
+  code {
+    background: var(--code-bg);
+    border: 1px solid #d5d8dc;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.88rem;
+    color: #922b21;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid #d5d8dc;
+    border-left: 4px solid var(--accent2);
+    border-radius: 4px;
+    padding: 14px 16px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.88rem;
+    overflow-x: auto;
+    margin: 10px 0 18px;
+    line-height: 1.5;
+  }
+
+  /* ── Callouts ── */
+  .note, .tip, .warn {
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 0.93rem;
+  }
+  .note { background: #eaf4fb; border-left: 4px solid var(--accent2); }
+  .tip  { background: #eafaf1; border-left: 4px solid var(--ok); }
+  .warn { background: #fef9e7; border-left: 4px solid var(--warn); }
+  .note strong, .tip strong, .warn strong { display: block; margin-bottom: 4px; }
+
+  /* ── Step list ── */
+  ol.steps { padding-left: 0; counter-reset: step; list-style: none; }
+  ol.steps li {
+    counter-increment: step;
+    padding: 10px 10px 10px 52px;
+    position: relative;
+    margin-bottom: 8px;
+    background: var(--light);
+    border-radius: 4px;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 14px;
+    top: 10px;
+    background: var(--accent);
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 26px;
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+
+  /* ── Tab pill ── */
+  .tab-pill {
+    display: inline-block;
+    background: var(--accent2);
+    color: #fff;
+    padding: 2px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+
+  /* ── File tree ── */
+  .filetree {
+    background: #1c2833;
+    color: #abebc6;
+    border-radius: 6px;
+    padding: 16px 20px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.88rem;
+    line-height: 1.8;
+    margin: 14px 0 20px;
+  }
+  .filetree .dir  { color: #85c1e9; font-weight: bold; }
+  .filetree .note { background: none; border: none; color: #7f8c8d; padding: 0; margin: 0; font-size: 0.83rem; }
+
+  /* ── TOC ── */
+  nav.toc {
+    background: var(--light);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 24px;
+    margin-bottom: 36px;
+  }
+  nav.toc h2 { margin-top: 0; font-size: 1rem; border: none; padding: 0; margin-bottom: 10px; }
+  nav.toc ol { padding-left: 20px; }
+  nav.toc li { margin: 4px 0; }
+  nav.toc a  { color: var(--accent2); text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 60px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    font-size: 0.83rem;
+    color: #7f8c8d;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MXG Waveform Designer</h1>
+  <p>Multi-channel composite I/Q waveform designer for Agilent / Keysight MXG signal generators</p>
+  <span class="version">v1.16</span>
+</header>
+
+<!-- ── TABLE OF CONTENTS ── -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#start">Quick Start</a></li>
+    <li><a href="#overview">What the Tool Does</a></li>
+    <li><a href="#tab1">Tab 1 — Timing &amp; RF</a></li>
+    <li><a href="#tab2">Tab 2 — Channels</a></li>
+    <li><a href="#tab3">Tab 3 — Window &amp; Scale</a></li>
+    <li><a href="#tab4">Tab 4 — Output</a></li>
+    <li><a href="#tab5">Tab 5 — SCPI Download</a></li>
+    <li><a href="#workflow">Step-by-Step Build Workflow</a></li>
+    <li><a href="#outputs">Output Files Explained</a></li>
+    <li><a href="#validate">Validating a .bin File</a></li>
+    <li><a href="#reproduce">Reproducing a Build</a></li>
+    <li><a href="#instruments">Supported Instruments</a></li>
+  </ol>
+</nav>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="start">1 &nbsp; Quick Start</h2>
+
+<h3>Windows</h3>
+<p>Double-click <code>install_and_run.bat</code> in the project folder.</p>
+<p>The script will automatically create a Python virtual environment, install all required packages, and launch the GUI. No Anaconda, no pre-installed libraries needed — just Python 3.8 or newer from <a href="https://python.org">python.org</a>.</p>
+
+<h3>macOS / Linux</h3>
+<pre>bash install_and_run.sh</pre>
+
+<div class="note">
+  <strong>macOS note — tkinter</strong>
+  If the GUI window does not open, install the Tk binding for your Python version:<br>
+  Homebrew Python: <code>brew install python-tk</code><br>
+  Debian / Ubuntu: <code>sudo apt install python3-tk</code>
+</div>
+
+<h3>Manual launch (if packages are already installed)</h3>
+<pre>python mxg_waveform_designer.py</pre>
+
+<h3>Required packages</h3>
+<table>
+  <tr><th>Package</th><th>Minimum version</th><th>Purpose</th></tr>
+  <tr><td>numpy</td><td>1.24</td><td>Array maths, waveform generation</td></tr>
+  <tr><td>scipy</td><td>1.11</td><td>Windows, resampler, spectrograms</td></tr>
+  <tr><td>matplotlib</td><td>3.7</td><td>Diagnostic plots</td></tr>
+  <tr><td>pandas</td><td>2.0</td><td>Channel table export</td></tr>
+  <tr><td>pyvisa</td><td>1.13 (optional)</td><td>SCPI auto-download tab only</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="overview">2 &nbsp; What the Tool Does</h2>
+
+<p>The MXG Waveform Designer builds composite baseband I/Q waveforms made up of one or more <strong>channel banks</strong>. Each bank is a group of uniformly-spaced signal channels of the same type. Banks of different types can be combined freely — for example 30 LFM channels plus 8 BPSK channels in a single composite pulse train.</p>
+
+<p>Supported waveform types per channel:</p>
+<table>
+  <tr><th>Type</th><th>Description</th></tr>
+  <tr><td>LFM</td><td>Linear FM chirp — standard radar pulse compression waveform</td></tr>
+  <tr><td>NLFM</td><td>Non-linear FM — lower time sidelobes than LFM without amplitude window loss. Laws: tangent, cosine, hamming</td></tr>
+  <tr><td>CW</td><td>Continuous-wave pure tone</td></tr>
+  <tr><td>FMCW</td><td>FM-CW sweep — sawtooth or triangle shape</td></tr>
+  <tr><td>STEPPED</td><td>Stepped-frequency burst — N equal-dwell CW tones spanning the bandwidth</td></tr>
+  <tr><td>BPSK</td><td>Binary phase-coded — Barker-13 by default, or custom chip sequence</td></tr>
+  <tr><td>FRANK</td><td>Frank polyphase code — near-ideal thumbtack ambiguity function</td></tr>
+</table>
+
+<p>The output is saved to a <code>params/</code> subfolder as binary (<code>.bin</code>), MATLAB (<code>.mat</code>), CSV, and a JSON parameters file. The <code>_mxg_4mb.bin</code> file is sized and formatted for direct loading onto the instrument.</p>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="tab1">3 &nbsp; Tab 1 — Timing &amp; RF</h2>
+<p><span class="tab-pill">Timing &amp; RF</span> Sets the timing skeleton and instrument profile for the waveform.</p>
+
+<h3>Instrument selector</h3>
+<p>Choose your instrument from the dropdown at the top of this tab. Selecting an instrument automatically fills the recommended sample rate and displays the RF frequency range, maximum ARB clock, and modulation bandwidth limit in the info row below the dropdown.</p>
+<p>Select <strong>Custom (manual entry)</strong> to enter all values by hand with no automatic limits enforced.</p>
+
+<h3>Timing fields</h3>
+<table>
+  <tr><th>Field</th><th>What to enter</th></tr>
+  <tr><td>Sample rate (MHz)</td><td>ARB sample rate. Auto-filled when an instrument is selected. Must not exceed the instrument's ARB clock maximum or the bandwidth check will block the build.</td></tr>
+  <tr><td>Pulse width (µs)</td><td>Duration of the active signal within each PRI. Must be strictly less than the PRI.</td></tr>
+  <tr><td>PRI (µs)</td><td>Pulse Repetition Interval — total length of one pulse slot including dead time after the pulse.</td></tr>
+  <tr><td>Num pulses</td><td>Number of PRIs concatenated to form the full output waveform. More pulses = larger file.</td></tr>
+  <tr><td>RF centre (GHz)</td><td>Notional carrier frequency. Used for metadata and the MATLAB .m script only — does not affect baseband generation.</td></tr>
+</table>
+
+<div class="tip">
+  <strong>Rule of thumb for pulse width and PRI</strong>
+  A duty cycle of 50 % (pulse width = half the PRI) is a good starting point. E.g. pulse width 1000 µs, PRI 2000 µs.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="tab2">4 &nbsp; Tab 2 — Channels</h2>
+<p><span class="tab-pill">Channels</span> Defines which signals make up the composite waveform.</p>
+
+<h3>Bank list</h3>
+<p>The top section shows all currently defined channel banks in a table. Each row is one uniform group of channels. At launch a default 40-channel LFM bank is pre-loaded.</p>
+
+<table>
+  <tr><th>Button</th><th>Action</th></tr>
+  <tr><td>Add bank</td><td>Reads the entry form below and appends a new bank. You can add as many banks as needed — they are all combined into the final waveform.</td></tr>
+  <tr><td>Remove selected</td><td>Click a row in the list to highlight it, then click this to delete that bank.</td></tr>
+</table>
+
+<h3>New bank entry form</h3>
+<table>
+  <tr><th>Field</th><th>Description</th></tr>
+  <tr><td>Waveform type</td><td>Select one type for this bank. Each bank can be a different type.</td></tr>
+  <tr><td>Num channels</td><td>How many individual channels in this bank. They are placed at uniform frequency spacings centred on DC.</td></tr>
+  <tr><td>Chan spacing (MHz)</td><td>Frequency separation between adjacent channel centres. Make sure spacing ≥ bandwidth to avoid channel overlap.</td></tr>
+  <tr><td>Bandwidth/ch (MHz)</td><td>Chirp or sweep bandwidth per channel. Not used for CW channels.</td></tr>
+  <tr><td>Up-chirp</td><td>Tick for an up-sweep, untick for a down-sweep. Applies to LFM, NLFM, FMCW.</td></tr>
+  <tr><td>Waveform options</td><td>Extra fields that appear depending on the type selected:<br>
+    <strong>NLFM</strong>: Law (tangent / cosine / hamming), Beta shaping factor<br>
+    <strong>FMCW</strong>: Shape (sawtooth / triangle)<br>
+    <strong>STEPPED</strong>: Number of frequency steps<br>
+    <strong>BPSK</strong>: Chip rate (MHz)<br>
+    <strong>FRANK</strong>: Order M (M² total chips), Chip rate (MHz)</td></tr>
+</table>
+
+<h3>Bandwidth check bar</h3>
+<p>Updates live as you change channel parameters. Shows the occupied span of the current bank entry vs the selected instrument's modulation bandwidth limit.</p>
+<ul>
+  <li><strong style="color:#1e8449">Green ✓</strong> — within the instrument's modulation bandwidth limit.</li>
+  <li><strong style="color:#d35400">Red ⚠</strong> — exceeds the limit. The build will be blocked until you reduce channels, spacing, or bandwidth.</li>
+</ul>
+<p>The "Max channels" hint shows how many channels will fit at the current spacing before hitting the limit.</p>
+
+<div class="warn">
+  <strong>Occupied bandwidth formula</strong>
+  Occupied span = (N − 1) × spacing + per-channel bandwidth.<br>
+  For 40 channels at 3 MHz spacing with 2 MHz bandwidth: (39 × 3) + 2 = 119 MHz.
+  This exceeds the N5182A's 100 MHz limit — reduce to 32 channels at 3 MHz spacing to fit.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="tab3">5 &nbsp; Tab 3 — Window &amp; Scale</h2>
+<p><span class="tab-pill">Window &amp; Scale</span> Controls envelope shaping and channel amplitude weighting.</p>
+
+<h3>Pulse envelope window</h3>
+<table>
+  <tr><th>Field</th><th>Description</th></tr>
+  <tr><td>Apply pulse window</td><td>When ticked, multiplies the pulse time-domain envelope by the chosen window function to smooth the on/off transitions and reduce spectral sidelobes.</td></tr>
+  <tr><td>Window type</td><td><strong>hann</strong> (default) — good all-round sidelobe suppression.<br><strong>hamming</strong> — slightly higher sidelobes, slightly better main-lobe width.<br><strong>tukey</strong> — rectangular in the middle, cosine tapered at the edges. Tukey alpha controls the taper fraction (0 = rectangular, 1 = Hann).<br><strong>none</strong> — no windowing applied.</td></tr>
+  <tr><td>Tukey alpha</td><td>Only active when window type is tukey. Range 0–1. Default 0.25 gives a 25 % taper.</td></tr>
+</table>
+
+<h3>Peak scale</h3>
+<p>Sets the final peak amplitude of the composite waveform as a fraction of full scale (0–1). Default is <strong>0.85</strong>, leaving about 1.4 dB of headroom below the instrument's ±32767 clipping point. Reduce this value if you see scale utilisation warnings in the diagnostic plots.</p>
+
+<h3>Per-channel phase dither</h3>
+<p>When <strong>Random per-channel phase</strong> is ticked, each channel is assigned a random initial phase offset. This breaks the constructive interference that would otherwise cause a very high crest factor (PAPR) in a many-channel composite. The <strong>RNG seed</strong> value makes the random draw repeatable — the same seed always produces the same phase set.</p>
+
+<h3>Channel amplitude taper</h3>
+<p>Applies a cross-channel amplitude weighting across the bank so that edge channels are attenuated relative to centre channels. Useful for reducing spectral spillover outside the composite bandwidth.</p>
+<table>
+  <tr><th>Field</th><th>Description</th></tr>
+  <tr><td>Channel amplitude taper</td><td>Tick to enable. Applies the taper defined below across all channels in order of frequency.</td></tr>
+  <tr><td>Taper type</td><td><strong>cosine</strong> — simple cosine-squared roll-off between edge and centre scales.<br><strong>taylor</strong> — true Taylor window with specified sidelobe level and nbar. Better sidelobe control than cosine.<br><strong>chebwin</strong> — Chebyshev window with equiripple sidelobes at exactly the specified level.</td></tr>
+  <tr><td>Taylor nbar</td><td>Number of constant-level inner sidelobes adjacent to the main lobe. Typical value 4–6. Higher = sharper main lobe. Used by taylor and chebwin.</td></tr>
+  <tr><td>SLL (dB, neg.)</td><td>Desired sidelobe level. Enter a negative number, e.g. <code>-30</code> for −30 dB suppression. Used by taylor and chebwin.</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="tab4">6 &nbsp; Tab 4 — Output</h2>
+<p><span class="tab-pill">Output</span> Controls where files are saved, what they are named, and which formats are written.</p>
+
+<table>
+  <tr><th>Field / Button</th><th>Description</th></tr>
+  <tr><td>Output folder</td><td>Root directory for saved files. A <code>params/</code> subfolder is created inside it automatically. Click <strong>Browse…</strong> to choose a folder.</td></tr>
+  <tr><td>File name</td><td>Base name stem used for all output files. Click <strong>Auto-name</strong> to generate a descriptive name from the current parameters (see below). Leave blank and click Build to auto-generate.</td></tr>
+  <tr><td>Auto-name button</td><td>Generates and fills in a name of the form:<br><code>LFM_40ch_125MHz_1000us_20pri_20260405_143211</code><br>Each part: waveform types, channel count, sample rate, pulse width, number of PRIs, date and time. The timestamp ensures every build produces a unique name.</td></tr>
+  <tr><td>Save .MAT</td><td>MATLAB binary archive containing the IQ array, config parameters, and channel table. Open in MATLAB with <code>load('filename.mat')</code>.</td></tr>
+  <tr><td>Save .CSV</td><td>Raw I/Q data as comma-separated text columns. Also produces a <code>_channel_table.csv</code> with per-channel metadata.</td></tr>
+  <tr><td>Save .BIN</td><td>Binary waveform files for the MXG. Always produces two files: <code>_full.bin</code> (full resolution) and <code>_mxg_4mb.bin</code> (resampled to fit the 4 MB MXG download limit). An <code>_info.txt</code> sidecar records the sample rate to set on the instrument.</td></tr>
+  <tr><td>MXG BIN limit (MB)</td><td>Maximum size of the resampled .bin. Default 4 MB matches the N5182A download limit. Increase only if your instrument supports larger waveform files.</td></tr>
+  <tr><td>Save 89600 VSA .mat</td><td>Exports a separate .mat file in Keysight 89600 VSA import format. In the 89600 VSA software: <em>File → Load Data File</em> and select the <code>_vsa89600.mat</code> file.</td></tr>
+  <tr><td>Save MATLAB .m script</td><td>Generates a <code>_load.m</code> script that loads the .mat in MATLAB, plots a spectrogram, and contains a complete <code>tcpclient</code> SCPI download example for MATLAB Instrument Control Toolbox.</td></tr>
+  <tr><td>Show diagnostic plots</td><td>Opens three matplotlib windows after the build: time-domain I/Q, power spectrum, and spectrogram. Windows are fully interactive — zoom, pan, and save using the toolbar.</td></tr>
+</table>
+
+<div class="tip">
+  <strong>Params JSON — always saved automatically</strong>
+  Every build writes a <code>_params.json</code> file to <code>params/</code> regardless of the checkboxes above. This file captures every parameter used in the build so the exact waveform can be reproduced later on any machine.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="tab5">7 &nbsp; Tab 5 — SCPI Download</h2>
+<p><span class="tab-pill">SCPI</span> Transfers a <code>_mxg_4mb.bin</code> file directly to a connected N5182A over LAN or GPIB without manually copying files.</p>
+
+<div class="note">
+  <strong>Requires PyVISA</strong>
+  Install it once before using this tab:<br>
+  <code>pip install pyvisa pyvisa-py</code><br>
+  The tab shows an install reminder if pyvisa is not found.
+</div>
+
+<table>
+  <tr><th>Field</th><th>What to enter</th></tr>
+  <tr><td>VISA resource</td><td>The instrument's address string. LAN example: <code>TCPIP0::192.168.1.100::5025::SOCKET</code>. GPIB example: <code>GPIB0::19::INSTR</code>. Find the address in the instrument's I/O config menu or using Keysight Connection Expert.</td></tr>
+  <tr><td>Waveform name</td><td>Name the waveform will have in the instrument's catalog, e.g. <code>my_lfm_composite</code>. No spaces or special characters.</td></tr>
+  <tr><td>Sample rate (MHz)</td><td>Sample rate to set on the ARB after transfer. Must match the value in the <code>_mxg_4mb_info.txt</code> sidecar file.</td></tr>
+  <tr><td>Bin file path</td><td>Full path to the <code>_mxg_4mb.bin</code> file. Click <strong>Browse…</strong> to navigate to it.</td></tr>
+</table>
+
+<p>Click <strong>Connect &amp; Download to N5182A</strong>. The status bar below the button shows connection progress, then transfer progress, then either a green "Done" confirmation or a red error message.</p>
+
+<p>What the download does automatically:</p>
+<ol>
+  <li>Transfers the .bin file using the SCPI <code>MMEM:DATA</code> block-data command.</li>
+  <li>Selects the waveform: <code>WGEN:ARB:WAVEFORM "WFM1:&lt;name&gt;"</code></li>
+  <li>Sets the sample rate: <code>WGEN:ARB:SRAT &lt;rate&gt;</code></li>
+  <li>Enables ARB output: <code>:OUTPUT:STATE ON</code></li>
+</ol>
+
+<div class="tip">
+  <strong>Manual SCPI option</strong>
+  A <code>_mxg_4mb_scpi.txt</code> file is always saved alongside the .bin. It contains the exact SCPI command sequence in both Python/PyVISA form and raw form for use with Keysight IO Libraries Suite or any other VISA client.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="workflow">8 &nbsp; Step-by-Step Build Workflow</h2>
+
+<ol class="steps">
+  <li><strong>Select your instrument</strong> on the Timing &amp; RF tab. The sample rate auto-fills. Set your pulse width, PRI, and number of pulses.</li>
+  <li><strong>Define channel banks</strong> on the Channels tab. Adjust the default LFM bank or remove it and add new banks. Watch the bandwidth check bar — it must be green before you can build.</li>
+  <li><strong>Set windowing and taper</strong> on the Window &amp; Scale tab. For most cases the defaults (Hann window, no taper, peak scale 0.85) work well.</li>
+  <li><strong>Configure output</strong> on the Output tab. Click <strong>Browse…</strong> to pick a save folder, then click <strong>Auto-name</strong> to generate a unique filename.</li>
+  <li><strong>Click Build Waveform</strong>. The button shows "Building…" and the status bar at the bottom of the window shows progress. The GUI stays open and responsive.</li>
+  <li><strong>Review the plots</strong> if "Show diagnostic plots" is ticked. The time-domain, spectrum, and spectrogram windows open and can be moved, zoomed, and saved.</li>
+  <li><strong>Load onto the instrument</strong> — either use the SCPI tab, or copy the <code>_mxg_4mb.bin</code> file manually via FTP/USB and follow the instructions in the <code>_mxg_4mb_scpi.txt</code> file.</li>
+  <li><strong>Build again</strong> without restarting — click Auto-name again for a new timestamp, adjust any parameters, and click Build. Previous files are never overwritten.</li>
+</ol>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="outputs">9 &nbsp; Output Files Explained</h2>
+
+<p>All files are written to <code>&lt;output folder&gt;/params/</code>.</p>
+
+<div class="filetree">
+<span class="dir">params/</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_full.bin</b>         <span class="note">← full-res archive</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_mxg_4mb.bin</b>      <span class="note">← load this onto the MXG</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_mxg_4mb_info.txt</b>  <span class="note">← sample rate to set</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_mxg_4mb_scpi.txt</b>  <span class="note">← SCPI command sequence</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>.mat</b>               <span class="note">← MATLAB archive</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>.csv</b>               <span class="note">← raw I/Q text</span><br>
+├── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_channel_table.csv</b>  <span class="note">← per-channel metadata</span><br>
+└── LFM_40ch_125MHz_1000us_20pri_20260405_143211<b>_params.json</b>       <span class="note">← always saved</span><br>
+</div>
+
+<h3>Binary file format (N5182A)</h3>
+<table>
+  <tr><th>Property</th><th>Value</th></tr>
+  <tr><td>Data type</td><td>int16 (signed 16-bit integer)</td></tr>
+  <tr><td>Byte order</td><td>Big-endian (MSB first)</td></tr>
+  <tr><td>Interleave</td><td>I₀, Q₀, I₁, Q₁, … (sample-interleaved)</td></tr>
+  <tr><td>Full scale</td><td>±32767</td></tr>
+  <tr><td>File extension</td><td>.bin</td></tr>
+</table>
+
+<h3>_params.json contents</h3>
+<p>The JSON file records everything needed to reproduce the build exactly:</p>
+<ul style="margin-left:20px; margin-bottom:12px;">
+  <li>Full <code>CompositeConfig</code> — every timing and scaling parameter</li>
+  <li>Full channel list — type, centre frequency, bandwidth, and all type-specific parameters for every channel</li>
+  <li>Derived statistics — total samples, waveform duration, PAPR, channel type counts</li>
+  <li>Build timestamp and output directory</li>
+</ul>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="validate">10 &nbsp; Validating a .bin File</h2>
+
+<p>Run <code>mxg_bin_validate.py</code> from the command line to check any .bin file before loading it onto the instrument.</p>
+
+<pre>python mxg_bin_validate.py params/&lt;stem&gt;_mxg_4mb.bin --fs 125</pre>
+
+<p>The tool prints a report showing:</p>
+<ul style="margin-left:20px; margin-bottom:12px;">
+  <li>File size and IQ pair count</li>
+  <li>Endianness check — confirms the file is big-endian as required by the N5182A</li>
+  <li>I and Q min/max values and peak amplitude</li>
+  <li>Scale utilisation — what percentage of ±32767 full scale is used</li>
+  <li>PAPR (Peak-to-Average Power Ratio) in dB</li>
+  <li>Any warnings (wrong endianness, low scale utilisation, file too large)</li>
+</ul>
+
+<p>It also opens a four-panel diagnostic plot:</p>
+<ul style="margin-left:20px; margin-bottom:12px;">
+  <li><strong>Time domain</strong> — I and Q waveforms with full-scale markers</li>
+  <li><strong>IQ constellation</strong> — scatter plot of I vs Q</li>
+  <li><strong>Amplitude envelope</strong> — magnitude |I + jQ|</li>
+  <li><strong>Welch PSD</strong> — averaged power spectral density in dB/Hz</li>
+</ul>
+
+<p>Command-line options:</p>
+<table>
+  <tr><th>Flag</th><th>Description</th></tr>
+  <tr><td>--fs 125</td><td>Sample rate in MSa/s. Default 125. Must match the value in <code>_mxg_4mb_info.txt</code>.</td></tr>
+  <tr><td>--info &lt;file&gt;</td><td>Path to the <code>_info.txt</code> sidecar. Auto-detected if omitted.</td></tr>
+  <tr><td>--no-plot</td><td>Print the report only, skip plots.</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="reproduce">11 &nbsp; Reproducing a Build on Another Machine</h2>
+
+<p>Copy the <code>params/</code> folder (or just the <code>_params.json</code> file) to the other machine, then run:</p>
+
+<pre>from mxg_waveform_designer import load_params, CompositeBuilder, WaveformExporter
+
+cfg, channels = load_params('params/LFM_40ch_125MHz_1000us_20pri_&lt;ts&gt;_params.json')
+iq, table = CompositeBuilder(cfg, channels).build()
+WaveformExporter().save_all(iq, cfg, channels, table)</pre>
+
+<p>This reconstructs the identical waveform from the saved parameters without needing to open the GUI.</p>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2 id="instruments">12 &nbsp; Supported Instruments</h2>
+
+<table>
+  <tr><th>Instrument</th><th>Mod BW</th><th>Max ARB fs</th><th>ARB Memory</th><th>RF Range</th></tr>
+  <tr><td>N5182A MXG 1st gen</td><td>100 MHz</td><td>125 MSa/s</td><td>8–64 MSa</td><td>250 kHz – 6 GHz</td></tr>
+  <tr><td>N5172B EXG X-Series</td><td>120 MHz</td><td>150 MSa/s</td><td>32–512 MSa</td><td>9 kHz – 6 GHz</td></tr>
+  <tr><td>N5172B EXG ext I/Q</td><td>200 MHz</td><td>150 MSa/s</td><td>32–512 MSa</td><td>9 kHz – 6 GHz</td></tr>
+  <tr><td>N5182B MXG std</td><td>80 MHz</td><td>200 MSa/s</td><td>up to 512 MSa</td><td>9 kHz – 6 GHz</td></tr>
+  <tr><td>N5182B MXG opt 1EL</td><td>160 MHz</td><td>200 MSa/s</td><td>up to 512 MSa</td><td>9 kHz – 6 GHz</td></tr>
+  <tr><td>E8267D PSG std</td><td>80 MHz</td><td>200 MSa/s</td><td>up to 64 MSa</td><td>100 kHz – 44 GHz</td></tr>
+  <tr><td>E8267D PSG opt H1E</td><td>2000 MHz</td><td>200 MSa/s</td><td>up to 64 MSa</td><td>100 kHz – 44 GHz</td></tr>
+  <tr><td>E4438C ESG</td><td>80 MHz</td><td>100 MSa/s</td><td>up to 32 MSa</td><td>250 kHz – 6 GHz</td></tr>
+  <tr><td>M9381A PXI VSG</td><td>160 MHz</td><td>200 MSa/s</td><td>up to 256 MSa</td><td>1 MHz – 3 GHz</td></tr>
+</table>
+
+<div class="note">
+  <strong>Source</strong>
+  Instrument specifications from Keysight datasheet 5991-0192EN, Table 2.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<footer>
+  MXG Waveform Designer v1.16 &nbsp;·&nbsp;
+  Repository: <a href="https://github.com/gl4500/mxg-waveform-designer">github.com/gl4500/mxg-waveform-designer</a> &nbsp;·&nbsp;
+  Supporting docs: <a href="CHANGELOG.md">CHANGELOG.md</a>
+</footer>
+
+</body>
+</html>
