@@ -50,6 +50,7 @@ from typing import List, Optional, Dict, Any
 import datetime
 import json
 import os
+import threading
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1393,11 +1394,18 @@ class WaveformGUI:
         self._tab_scpi(nb)
 
         btn_frame = ttk.Frame(self.root)
-        btn_frame.pack(fill='x', padx=8, pady=(0, 8))
-        ttk.Button(btn_frame, text='Build Waveform',
-                   command=self._on_build).pack(side='right', padx=4)
-        ttk.Button(btn_frame, text='Cancel',
+        btn_frame.pack(fill='x', padx=8, pady=(0, 4))
+        self._build_btn = ttk.Button(btn_frame, text='Build Waveform',
+                                     command=self._on_build)
+        self._build_btn.pack(side='right', padx=4)
+        ttk.Button(btn_frame, text='Close',
                    command=self.root.destroy).pack(side='right')
+
+        # Status bar shown below buttons during / after build
+        self._status_label = tk.Label(
+            self.root, text='Ready', anchor='w',
+            font=('Segoe UI', 9), fg='grey', padx=8)
+        self._status_label.pack(fill='x', pady=(0, 6))
 
     def _tab_timing(self, nb):
         f = ttk.Frame(nb, padding=10)
@@ -1945,8 +1953,6 @@ class WaveformGUI:
             messagebox.showerror('Input error', str(e))
             return
 
-        self.root.destroy()
-
         cfg = CompositeConfig(
             fs               = p['fs_mhz'] * 1e6,
             num_pulses       = p['num_pulses'],
@@ -1971,8 +1977,54 @@ class WaveformGUI:
             save_m_script    = p['save_m_script'],
         )
 
-        channels = self._build_channels(p)
-        run(cfg, channels, plot=p['show_plots'], max_bin_mb=p['max_bin_mb'])
+        try:
+            channels = self._build_channels(p)
+        except ValueError as e:
+            messagebox.showerror('Channel error', str(e))
+            return
+
+        # Disable the button and show status while the build runs
+        self._build_btn.config(state='disabled', text='Building…')
+        self._status_label.config(text='Building waveform…', fg='#555')
+        self.root.update_idletasks()
+
+        def _worker():
+            try:
+                builder       = CompositeBuilder(cfg, channels)
+                iq, tbl       = builder.build()
+                exporter      = WaveformExporter()
+                exporter.save_all(iq, cfg, channels, tbl,
+                                  max_bin_mb=p['max_bin_mb'])
+                # Hand results back to main thread
+                self.root.after(0, lambda: self._build_done(
+                    iq, cfg, channels, p['show_plots']))
+            except Exception as exc:
+                self.root.after(0, lambda e=exc: self._build_error(e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _build_done(self, iq, cfg, channels, show_plots):
+        """Called on the main thread when the worker finishes successfully."""
+        base = os.path.basename(cfg.base_file_name)
+        self._status_label.config(
+            text=f'Done — {base}  ({len(iq):,} samples, '
+                 f'{len(iq)/cfg.fs*1e3:.1f} ms)  '
+                 f'Files saved to: {os.path.dirname(os.path.abspath(cfg.base_file_name))}',
+            fg='green')
+        self._build_btn.config(state='normal', text='Build Waveform')
+
+        if show_plots:
+            NsPRI   = int(round(cfg.fs * cfg.pri_s))
+            plotter = WaveformPlotter(cfg.fs)
+            plotter.plot_all(iq, channels,
+                             title_prefix=base,
+                             pri_samples=NsPRI)
+
+    def _build_error(self, exc):
+        """Called on the main thread when the worker raises an exception."""
+        self._status_label.config(text=f'Error: {exc}', fg='red')
+        self._build_btn.config(state='normal', text='Build Waveform')
+        messagebox.showerror('Build failed', str(exc))
 
     def _collect(self) -> dict:
         """Read and validate all widget values."""
