@@ -908,61 +908,67 @@ class WaveformGUI:
             'freq_range':    '—',
             'notes':         'No automatic limits applied',
         },
-        'N5182B MXG  –  80 MHz BW (standard)': {
+        # ── First-generation MXG (N5182A) ───────────────────────────────────
+        # Source: Keysight 5991-0192EN datasheet, Table 2
+        'N5182A MXG  –  100 MHz BW  [1st gen]': {
+            'max_bw_hz':     100e6,    # 100 MHz max internal modulation BW
+            'max_fs_hz':     125e6,    # 125 MSa/s max ARB sample rate
+            'rec_fs_hz':     125e6,
+            'max_mem_msamp': 64,       # 8–64 MSa waveform memory
+            'freq_range':    '250 kHz – 6 GHz',
+            'notes':         '125 MSa/s max | 100 MHz BW | 8–64 MSa memory',
+        },
+        # ── EXG X-Series (N5172B) – replacement for N5182A ──────────────────
+        # Source: Keysight 5991-0192EN datasheet, Table 2
+        'N5172B EXG  –  120 MHz BW  [X-Series]': {
+            'max_bw_hz':     120e6,    # 120 MHz max internal modulation BW
+            'max_fs_hz':     150e6,    # 150 MSa/s max ARB sample rate
+            'rec_fs_hz':     150e6,
+            'max_mem_msamp': 512,      # 32–512 MSa waveform memory
+            'freq_range':    '9 kHz – 6 GHz',
+            'notes':         '150 MSa/s max | 120 MHz BW | up to 512 MSa memory',
+        },
+        'N5172B EXG  –  200 MHz BW  (external I/Q)': {
+            'max_bw_hz':     200e6,    # 200 MHz nominal 3 dB BW via ext I/Q
+            'max_fs_hz':     150e6,
+            'rec_fs_hz':     150e6,
+            'max_mem_msamp': 512,
+            'freq_range':    '9 kHz – 6 GHz',
+            'notes':         'External I/Q input path; 200 MHz nominal 3 dB BW',
+        },
+        # ── MXG X-Series (N5182B) ────────────────────────────────────────────
+        'N5182B MXG  –  80 MHz BW  (standard)': {
             'max_bw_hz':     80e6,
             'max_fs_hz':     200e6,
             'rec_fs_hz':     100e6,
             'max_mem_msamp': 512,
-            'freq_range':    '9 kHz – 3 GHz',
-            'notes':         'Standard; no baseband option',
+            'freq_range':    '9 kHz – 6 GHz',
+            'notes':         '200 MSa/s max | 80 MHz BW standard',
         },
-        'N5182B MXG  –  160 MHz BW (opt 1EL)': {
+        'N5182B MXG  –  160 MHz BW  (opt 1EL)': {
             'max_bw_hz':     160e6,
             'max_fs_hz':     200e6,
             'rec_fs_hz':     200e6,
             'max_mem_msamp': 512,
-            'freq_range':    '9 kHz – 3 GHz',
-            'notes':         'Option 1EL: wideband baseband',
+            'freq_range':    '9 kHz – 6 GHz',
+            'notes':         'Option 1EL: 160 MHz wideband baseband',
         },
-        'N5182A MXG  –  80 MHz BW': {
-            'max_bw_hz':     80e6,
-            'max_fs_hz':     100e6,
-            'rec_fs_hz':     100e6,
-            'max_mem_msamp': 64,
-            'freq_range':    '100 kHz – 3 GHz',
-            'notes':         'Previous-gen MXG; 100 MSa/s max',
-        },
-        'N5172B EXG  –  40 MHz BW (standard)': {
-            'max_bw_hz':     40e6,
-            'max_fs_hz':     200e6,
-            'rec_fs_hz':     50e6,
-            'max_mem_msamp': 512,
-            'freq_range':    '9 kHz – 3 GHz',
-            'notes':         'Entry-level X-Series',
-        },
-        'N5172B EXG  –  80 MHz BW (opt 1EL)': {
-            'max_bw_hz':     80e6,
-            'max_fs_hz':     200e6,
-            'rec_fs_hz':     100e6,
-            'max_mem_msamp': 512,
-            'freq_range':    '9 kHz – 3 GHz',
-            'notes':         'Option 1EL on EXG',
-        },
-        'E8267D PSG  –  80 MHz BW (standard)': {
+        # ── PSG / ESG ────────────────────────────────────────────────────────
+        'E8267D PSG  –  80 MHz BW  (standard)': {
             'max_bw_hz':     80e6,
             'max_fs_hz':     200e6,
             'rec_fs_hz':     100e6,
             'max_mem_msamp': 64,
             'freq_range':    '100 kHz – 44 GHz',
-            'notes':         'High-performance PSG vector',
+            'notes':         'High-performance PSG vector; 80 MHz BW',
         },
-        'E8267D PSG  –  2 GHz BW (opt H1E)': {
+        'E8267D PSG  –  2 GHz BW  (opt H1E)': {
             'max_bw_hz':     2000e6,
             'max_fs_hz':     200e6,
             'rec_fs_hz':     200e6,
             'max_mem_msamp': 64,
             'freq_range':    '100 kHz – 44 GHz',
-            'notes':         'Option H1E: 2 GHz BB (external I/Q)',
+            'notes':         'Option H1E: 2 GHz BB via external I/Q',
         },
         'E4438C ESG  –  80 MHz BW': {
             'max_bw_hz':     80e6,
@@ -972,6 +978,7 @@ class WaveformGUI:
             'freq_range':    '250 kHz – 6 GHz',
             'notes':         'Legacy ESG; 100 MSa/s max',
         },
+        # ── PXI ─────────────────────────────────────────────────────────────
         'M9381A PXI VSG  –  160 MHz BW': {
             'max_bw_hz':     160e6,
             'max_fs_hz':     200e6,
