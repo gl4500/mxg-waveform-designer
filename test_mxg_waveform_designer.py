@@ -19,6 +19,7 @@ import mxg_waveform_designer as mwd
 from mxg_waveform_designer import (
     WaveformType, ChannelConfig, CompositeConfig, CompositeBuilder,
     WaveformExporter, WaveformPlotter, resample_to_max_mb,
+    load_params,
     _kernel_lfm, _kernel_nlfm, _kernel_cw, _kernel_fmcw,
     _kernel_stepped, _kernel_bpsk, _kernel_frank,
     lfm_channel_bank, nlfm_channel_bank,
@@ -406,3 +407,68 @@ class TestExportHelpers:
         content = open(sidecar).read()
         assert 'MMEM:DATA' in content
         assert 'WGEN:ARB:WAVEFORM' in content
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Params JSON auto-save + load_params roundtrip
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestParamsSave:
+
+    def _build(self, tmp_path):
+        cfg      = _simple_cfg(
+            base_file_name=str(tmp_path / 'test_wfm'),
+            save_bin=False, save_mat=False, save_csv=False,
+        )
+        channels = _simple_channels(4)
+        iq, tbl  = CompositeBuilder(cfg, channels).build()
+        WaveformExporter().save_all(iq, cfg, channels, tbl)
+        return cfg, channels, iq, tmp_path
+
+    def test_params_dir_created(self, tmp_path):
+        self._build(tmp_path)
+        assert os.path.isdir(tmp_path / 'params')
+
+    def test_params_file_exists(self, tmp_path):
+        self._build(tmp_path)
+        assert os.path.isfile(tmp_path / 'params' / 'test_wfm_params.json')
+
+    def test_params_json_keys(self, tmp_path):
+        self._build(tmp_path)
+        import json
+        doc = json.loads((tmp_path / 'params' / 'test_wfm_params.json'
+                          ).read_text(encoding='utf-8'))
+        for key in ('_version', '_saved', 'config', 'channels', 'derived'):
+            assert key in doc
+
+    def test_params_channel_count(self, tmp_path):
+        self._build(tmp_path)
+        import json
+        doc = json.loads((tmp_path / 'params' / 'test_wfm_params.json'
+                          ).read_text(encoding='utf-8'))
+        assert doc['derived']['total_channels'] == 4
+
+    def test_load_params_roundtrip(self, tmp_path):
+        """load_params() should reconstruct identical cfg and channels."""
+        cfg_orig, chs_orig, _, _ = self._build(tmp_path)
+        params_path = str(tmp_path / 'params' / 'test_wfm_params.json')
+        cfg2, chs2 = load_params(params_path)
+
+        assert cfg2.fs           == cfg_orig.fs
+        assert cfg2.num_pulses   == cfg_orig.num_pulses
+        assert cfg2.pulse_width_s == cfg_orig.pulse_width_s
+        assert len(chs2)         == len(chs_orig)
+        assert chs2[0].waveform_type == chs_orig[0].waveform_type
+
+    def test_params_saved_each_unique_build(self, tmp_path):
+        """Two builds with different file names produce two separate param files."""
+        for name in ('build_a', 'build_b'):
+            cfg = _simple_cfg(
+                base_file_name=str(tmp_path / name),
+                save_bin=False, save_mat=False, save_csv=False,
+            )
+            chs = _simple_channels(2)
+            iq, tbl = CompositeBuilder(cfg, chs).build()
+            WaveformExporter().save_all(iq, cfg, chs, tbl)
+        files = list((tmp_path / 'params').iterdir())
+        assert len(files) == 2

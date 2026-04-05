@@ -47,6 +47,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from fractions import Fraction
 from typing import List, Optional, Dict, Any
+import datetime
+import json
 import os
 
 
@@ -786,16 +788,21 @@ class WaveformExporter:
     MXG_LIMIT_MB = 4.0   # MXG download size limit
 
     def save_all(self, iq: np.ndarray, config: CompositeConfig,
+                 channels: List['ChannelConfig'],
                  channel_table: pd.DataFrame, max_bin_mb: float = 0.0):
         """
         Save all enabled formats.
 
         max_bin_mb : override the default 4 MB MXG limit if needed (0 = use default).
+        A _params.json file is always written alongside the output files.
         """
         I    = np.real(iq).astype(np.float64)
         Q    = np.imag(iq).astype(np.float64)
         base = config.base_file_name
         limit_mb = max_bin_mb if max_bin_mb > 0 else self.MXG_LIMIT_MB
+
+        # Always save parameters first so the build is reproducible
+        self._save_params(base, config, channels, iq, limit_mb)
 
         if config.save_mat:
             self._save_mat(base, iq, I, Q, config, channel_table)
@@ -828,6 +835,7 @@ class WaveformExporter:
                 f.write(f'Format        : interleaved int16 big-endian I/Q (I0,Q0,I1,Q1,...) scaled ±32767\n')
 
         print('\nFiles written:')
+        print(f'  params/{os.path.basename(base)}_params.json  – full waveform parameters (auto-saved)')
         if config.save_mat:
             mat_mb = os.path.getsize(f'{base}.mat') / 1e6
             print(f'  {base}.mat  ({mat_mb:.1f} MB)')
@@ -877,6 +885,69 @@ class WaveformExporter:
         iq_arr = np.column_stack([I, Q])
         np.savetxt(f'{base}.csv', iq_arr, delimiter=',', header='I,Q', comments='')
         table.to_csv(f'{base}_channel_table.csv', index=False)
+
+    @staticmethod
+    def _save_params(base: str, cfg, channels: list,
+                     iq: np.ndarray, limit_mb: float) -> None:
+        """
+        Automatically write a _params.json file alongside every build.
+
+        The file captures the full CompositeConfig, every channel's parameters,
+        and key derived statistics so the build is exactly reproducible.
+
+        To recreate the waveform on another machine:
+            python mxg_waveform_designer.py   (then load the JSON manually)
+        or use the headless API:
+            cfg, channels = load_params('mxg_waveform_params.json')
+            iq, table = CompositeBuilder(cfg, channels).build()
+        """
+        import dataclasses
+
+        # ── CompositeConfig → plain dict ─────────────────────────────────────
+        cfg_dict = dataclasses.asdict(cfg)
+        # base_file_name contains the full path; store only the stem for portability
+        cfg_dict['base_file_name'] = os.path.basename(cfg.base_file_name)
+
+        # ── Channels → list of dicts (enum → string) ─────────────────────────
+        ch_list = []
+        for ch in channels:
+            d = dataclasses.asdict(ch)
+            d['waveform_type'] = ch.waveform_type.name   # enum → 'LFM', 'BPSK' etc.
+            ch_list.append(d)
+
+        # ── Derived statistics ────────────────────────────────────────────────
+        peak    = float(np.max(np.abs(iq)))
+        rms     = float(np.sqrt(np.mean(np.abs(iq) ** 2)))
+        papr_db = 20 * np.log10(peak / rms) if rms > 0 else 0.0
+
+        doc = {
+            '_version':       'mxg_waveform_designer v1.12',
+            '_saved':         datetime.datetime.now().isoformat(timespec='seconds'),
+            '_output_dir':    os.path.dirname(os.path.abspath(
+                                  cfg.base_file_name)) if cfg.base_file_name else '.',
+            'config':         cfg_dict,
+            'channels':       ch_list,
+            'derived': {
+                'total_channels':     len(channels),
+                'total_samples':      len(iq),
+                'waveform_duration_s': len(iq) / cfg.fs,
+                'peak_amplitude':     round(peak, 8),
+                'rms_amplitude':      round(rms, 8),
+                'papr_db':            round(papr_db, 4),
+                'bin_limit_mb':       limit_mb,
+                'channel_types':      {k: int(v) for k, v in
+                                       _count_types(channels).items()},
+            },
+        }
+
+        # Save into  <output_dir>/params/<stem>_params.json
+        out_dir    = os.path.dirname(os.path.abspath(base)) if os.path.dirname(base) else '.'
+        params_dir = os.path.join(out_dir, 'params')
+        os.makedirs(params_dir, exist_ok=True)
+        stem = os.path.basename(base)
+        path = os.path.join(params_dir, f'{stem}_params.json')
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(doc, fh, indent=2)
 
     @staticmethod
     def _save_bin(base, I, Q):
@@ -1034,6 +1105,42 @@ clear t;
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PARAMS HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _count_types(channels: List[ChannelConfig]) -> dict:
+    """Return {WaveformType.name: count} for a channel list."""
+    counts: dict = {}
+    for ch in channels:
+        name = ch.waveform_type.name
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def load_params(path: str):
+    """
+    Load a _params.json file and reconstruct (CompositeConfig, [ChannelConfig]).
+
+    Usage
+    -----
+        cfg, channels = load_params('mxg_waveform_params.json')
+        iq, table = CompositeBuilder(cfg, channels).build()
+    """
+    with open(path, encoding='utf-8') as fh:
+        doc = json.load(fh)
+
+    cfg_dict = doc['config']
+    cfg = CompositeConfig(**cfg_dict)
+
+    channels = []
+    for d in doc['channels']:
+        d['waveform_type'] = WaveformType[d['waveform_type']]
+        channels.append(ChannelConfig(**d))
+
+    return cfg, channels
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RESAMPLER UTILITY
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1127,7 +1234,7 @@ def run(config: CompositeConfig, channels: List[ChannelConfig],
                          pri_samples=NsPRI)
 
     exporter = WaveformExporter()
-    exporter.save_all(iq, config, table, max_bin_mb=max_bin_mb)
+    exporter.save_all(iq, config, channels, table, max_bin_mb=max_bin_mb)
 
     return iq, table
 
