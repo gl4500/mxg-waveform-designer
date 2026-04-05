@@ -737,7 +737,7 @@ class WaveformExporter:
                 f.write(f'  *** Set this sample rate on the MXG ***\n')
                 f.write(f'Original fs   : {config.fs/1e6:.6f} MHz\n')
                 f.write(f'Downsample    : {config.fs/fs_small:.4f}x\n')
-                f.write(f'Format        : interleaved float32 I/Q (I0,Q0,I1,Q1,...)\n')
+                f.write(f'Format        : interleaved int16 big-endian I/Q (I0,Q0,I1,Q1,...) scaled ±32767\n')
 
         print('\nFiles written:')
         if config.save_mat:
@@ -781,9 +781,11 @@ class WaveformExporter:
 
     @staticmethod
     def _save_bin(base, I, Q):
-        buf = np.empty(2 * len(I), dtype=np.float32)
-        buf[0::2] = I.astype(np.float32)
-        buf[1::2] = Q.astype(np.float32)
+        # N5182A expects interleaved int16, big-endian, scaled to ±32767
+        scale = 32767.0 / max(np.max(np.abs(I)), np.max(np.abs(Q)), 1e-12)
+        buf = np.empty(2 * len(I), dtype='>i2')   # >i2 = big-endian int16
+        buf[0::2] = np.clip(I * scale, -32767, 32767).astype('>i2')
+        buf[1::2] = np.clip(Q * scale, -32767, 32767).astype('>i2')
         buf.tofile(f'{base}.bin')
 
 
@@ -807,7 +809,7 @@ def resample_to_max_mb(iq: np.ndarray, fs: float,
     if max_mb <= 0:
         return iq, fs                         # no limit requested
 
-    bytes_per_sample = 8                      # 2 × float32 (I + Q)
+    bytes_per_sample = 4                      # 2 × int16 (I + Q)
     max_samples = int(max_mb * 1e6 / bytes_per_sample)
     current_samples = len(iq)
 
@@ -1196,7 +1198,7 @@ class WaveformGUI:
         ttk.Checkbutton(f, text='Save .CSV',
                         variable=self._vars['save_csv']
                         ).grid(row=3, column=0, sticky='w')
-        ttk.Checkbutton(f, text='Save .BIN  (float32 I/Q for MXG)',
+        ttk.Checkbutton(f, text='Save .BIN  (int16 big-endian I/Q for MXG)',
                         variable=self._vars['save_bin']
                         ).grid(row=4, column=0, columnspan=3, sticky='w')
 
