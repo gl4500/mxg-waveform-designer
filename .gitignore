@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments (created by install_and_run scripts)
+.venv/
+venv/
+env/
+
+# Build outputs — generated files, not source
+*.bin
+*.mat
+*.csv
+*_info.txt
+*_scpi.txt
+*_load.m
+*_validate.png
+params/
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Conda — never commit radioconda or any conda env
+radioconda/
+anaconda/
+miniconda/
+*.conda
+*.condarc
+
+# Documents folder outputs (legacy standalone runs)
+# These are old copies before the project repo was set up
