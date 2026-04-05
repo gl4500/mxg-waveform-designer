@@ -891,6 +891,97 @@ class WaveformGUI:
     files are written to the chosen output folder.
     """
 
+    # ── Agilent / Keysight instrument profiles ───────────────────────────────
+    # Keys shown in the dropdown.
+    # max_bw_hz    : maximum I/Q modulation bandwidth the instrument supports
+    # max_fs_hz    : maximum ARB sample rate
+    # rec_fs_hz    : recommended sample rate (max_bw_hz / 0.80 guard band,
+    #                capped at max_fs_hz)
+    # max_mem_msamp: ARB memory in Msamples (affects max waveform length)
+    # freq_range   : RF frequency coverage (documentation only)
+    INSTRUMENT_PROFILES = {
+        '-- Custom (manual entry) --': {
+            'max_bw_hz':     None,
+            'max_fs_hz':     None,
+            'rec_fs_hz':     None,
+            'max_mem_msamp': None,
+            'freq_range':    '—',
+            'notes':         'No automatic limits applied',
+        },
+        'N5182B MXG  –  80 MHz BW (standard)': {
+            'max_bw_hz':     80e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     100e6,
+            'max_mem_msamp': 512,
+            'freq_range':    '9 kHz – 3 GHz',
+            'notes':         'Standard; no baseband option',
+        },
+        'N5182B MXG  –  160 MHz BW (opt 1EL)': {
+            'max_bw_hz':     160e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     200e6,
+            'max_mem_msamp': 512,
+            'freq_range':    '9 kHz – 3 GHz',
+            'notes':         'Option 1EL: wideband baseband',
+        },
+        'N5182A MXG  –  80 MHz BW': {
+            'max_bw_hz':     80e6,
+            'max_fs_hz':     100e6,
+            'rec_fs_hz':     100e6,
+            'max_mem_msamp': 64,
+            'freq_range':    '100 kHz – 3 GHz',
+            'notes':         'Previous-gen MXG; 100 MSa/s max',
+        },
+        'N5172B EXG  –  40 MHz BW (standard)': {
+            'max_bw_hz':     40e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     50e6,
+            'max_mem_msamp': 512,
+            'freq_range':    '9 kHz – 3 GHz',
+            'notes':         'Entry-level X-Series',
+        },
+        'N5172B EXG  –  80 MHz BW (opt 1EL)': {
+            'max_bw_hz':     80e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     100e6,
+            'max_mem_msamp': 512,
+            'freq_range':    '9 kHz – 3 GHz',
+            'notes':         'Option 1EL on EXG',
+        },
+        'E8267D PSG  –  80 MHz BW (standard)': {
+            'max_bw_hz':     80e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     100e6,
+            'max_mem_msamp': 64,
+            'freq_range':    '100 kHz – 44 GHz',
+            'notes':         'High-performance PSG vector',
+        },
+        'E8267D PSG  –  2 GHz BW (opt H1E)': {
+            'max_bw_hz':     2000e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     200e6,
+            'max_mem_msamp': 64,
+            'freq_range':    '100 kHz – 44 GHz',
+            'notes':         'Option H1E: 2 GHz BB (external I/Q)',
+        },
+        'E4438C ESG  –  80 MHz BW': {
+            'max_bw_hz':     80e6,
+            'max_fs_hz':     100e6,
+            'rec_fs_hz':     100e6,
+            'max_mem_msamp': 32,
+            'freq_range':    '250 kHz – 6 GHz',
+            'notes':         'Legacy ESG; 100 MSa/s max',
+        },
+        'M9381A PXI VSG  –  160 MHz BW': {
+            'max_bw_hz':     160e6,
+            'max_fs_hz':     200e6,
+            'rec_fs_hz':     200e6,
+            'max_mem_msamp': 256,
+            'freq_range':    '1 MHz – 3 GHz',
+            'notes':         'PXI modular VSG',
+        },
+    }
+
     # ── waveform-type-specific extra fields ─────────────────────────────────
     _EXTRA_FIELDS = {
         'LFM':     [],
@@ -908,9 +999,11 @@ class WaveformGUI:
         self.root = tk.Tk()
         self.root.title('MXG Waveform Designer')
         self.root.resizable(False, False)
-        self._vars: dict = {}
-        self._extra_frame = None
-        self._extra_vars: dict = {}
+        self._vars: dict        = {}
+        self._extra_frame       = None
+        self._extra_vars: dict  = {}
+        self._bw_status_label   = None   # live BW indicator
+        self._instr_notes_label = None   # instrument notes
         self._build_ui()
         self.root.mainloop()
 
@@ -935,14 +1028,48 @@ class WaveformGUI:
     def _tab_timing(self, nb):
         f = ttk.Frame(nb, padding=10)
         nb.add(f, text='Timing & RF')
-        fields = [
-            ('Sample rate (MHz)',   'fs_mhz',       150.0),
-            ('Pulse width (µs)',    'pw_us',         1000.0),
-            ('PRI (µs)',            'pri_us',        2000.0),
-            ('Num pulses',          'num_pulses',    20),
-            ('RF centre (GHz)',     'rf_ghz',        2.4),
+
+        # ── Instrument selection ─────────────────────────────────────────────
+        instr_frame = ttk.LabelFrame(f, text='Instrument', padding=6)
+        instr_frame.grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 8))
+
+        instr_names = list(self.INSTRUMENT_PROFILES.keys())
+        self._vars['instrument'] = tk.StringVar(value=instr_names[0])
+        instr_cb = ttk.Combobox(instr_frame,
+                                textvariable=self._vars['instrument'],
+                                values=instr_names, state='readonly', width=46)
+        instr_cb.grid(row=0, column=0, columnspan=3, sticky='ew', pady=2)
+        instr_cb.bind('<<ComboboxSelected>>', self._on_instrument_change)
+
+        # Instrument info row
+        ttk.Label(instr_frame, text='RF range:').grid(
+            row=1, column=0, sticky='w', padx=(0, 4))
+        self._instr_freq_label = ttk.Label(instr_frame, text='—', foreground='#555')
+        self._instr_freq_label.grid(row=1, column=1, sticky='w')
+
+        ttk.Label(instr_frame, text='Max fs:').grid(
+            row=1, column=2, sticky='w', padx=(12, 4))
+        self._instr_fs_label = ttk.Label(instr_frame, text='—', foreground='#555')
+        self._instr_fs_label.grid(row=1, column=3, sticky='w')
+
+        ttk.Label(instr_frame, text='Notes:').grid(
+            row=2, column=0, sticky='w', padx=(0, 4))
+        self._instr_notes_label = ttk.Label(instr_frame, text='No limits applied',
+                                            foreground='grey')
+        self._instr_notes_label.grid(row=2, column=1, columnspan=3, sticky='w')
+
+        # ── Timing fields ────────────────────────────────────────────────────
+        timing_fields = [
+            ('Sample rate (MHz)',  'fs_mhz',    150.0),
+            ('Pulse width (µs)',   'pw_us',    1000.0),
+            ('PRI (µs)',           'pri_us',   2000.0),
+            ('Num pulses',         'num_pulses',   20),
+            ('RF centre (GHz)',    'rf_ghz',      2.4),
         ]
-        self._make_fields(f, fields)
+        self._make_fields(f, timing_fields, start_row=1)
+
+        # Attach live BW check to fs field changes
+        self._vars['fs_mhz'].trace_add('write', lambda *_: self._update_bw_status())
 
     def _tab_channels(self, nb):
         f = ttk.Frame(nb, padding=10)
@@ -958,20 +1085,39 @@ class WaveformGUI:
         cb.bind('<<ComboboxSelected>>', self._on_type_change)
 
         fields = [
-            ('Num channels',        'n_channels',       40),
-            ('Chan spacing (MHz)',  'spacing_mhz',      3.0),
-            ('Bandwidth/ch (MHz)',  'bw_mhz',           2.0),
+            ('Num channels',       'n_channels',  40),
+            ('Chan spacing (MHz)', 'spacing_mhz',  3.0),
+            ('Bandwidth/ch (MHz)', 'bw_mhz',       2.0),
         ]
         self._make_fields(f, fields, start_row=1)
 
-        # Up/down chirp checkbox (relevant for LFM/NLFM/FMCW)
+        # Attach live BW check whenever channel params change
+        for key in ('n_channels', 'spacing_mhz', 'bw_mhz'):
+            self._vars[key].trace_add('write', lambda *_: self._update_bw_status())
+
+        # Up/down chirp checkbox
         self._vars['up_chirp'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text='Up-chirp', variable=self._vars['up_chirp']
                         ).grid(row=4, column=0, columnspan=2, sticky='w', pady=2)
 
+        # ── Live bandwidth status bar ────────────────────────────────────────
+        bw_frame = ttk.LabelFrame(f, text='Bandwidth check', padding=6)
+        bw_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=(8, 0))
+
+        self._bw_status_label = tk.Label(
+            bw_frame,
+            text='Select an instrument on the Timing & RF tab',
+            font=('Segoe UI', 9, 'bold'),
+            fg='grey', anchor='w', justify='left')
+        self._bw_status_label.pack(fill='x')
+
+        self._max_ch_label = tk.Label(
+            bw_frame, text='', fg='#444', anchor='w')
+        self._max_ch_label.pack(fill='x')
+
         # Frame for dynamic waveform-type extras
         self._extra_frame = ttk.LabelFrame(f, text='Waveform options', padding=6)
-        self._extra_frame.grid(row=5, column=0, columnspan=2,
+        self._extra_frame.grid(row=6, column=0, columnspan=2,
                                sticky='ew', pady=(6, 0))
         self._refresh_extra_fields('LFM')
 
@@ -1068,6 +1214,84 @@ class WaveformGUI:
             self._vars[key] = var
             ttk.Entry(parent, textvariable=var, width=16
                       ).grid(row=r, column=1, sticky='w', pady=2)
+
+    def _on_instrument_change(self, _event=None):
+        """Auto-fill fs and update info labels when instrument is selected."""
+        name    = self._vars['instrument'].get()
+        profile = self.INSTRUMENT_PROFILES[name]
+
+        # Update info labels
+        freq = profile['freq_range']
+        max_fs = profile['max_fs_hz']
+        notes  = profile['notes']
+        self._instr_freq_label.config(text=freq)
+        self._instr_fs_label.config(
+            text=f"{max_fs/1e6:.0f} MSa/s" if max_fs else '—')
+        self._instr_notes_label.config(text=notes)
+
+        # Auto-fill sample rate with recommended value
+        if profile['rec_fs_hz']:
+            self._vars['fs_mhz'].set(str(profile['rec_fs_hz'] / 1e6))
+
+        self._update_bw_status()
+
+    def _update_bw_status(self):
+        """Recompute occupied BW and update the status label on the Channels tab."""
+        if self._bw_status_label is None:
+            return
+
+        # Safely read current field values
+        try:
+            n   = int(float(self._vars['n_channels'].get()))
+            sp  = float(self._vars['spacing_mhz'].get()) * 1e6
+            bw  = float(self._vars['bw_mhz'].get()) * 1e6
+            fs  = float(self._vars['fs_mhz'].get()) * 1e6
+        except (ValueError, KeyError):
+            return
+
+        occupied = max(0, (n - 1) * sp + bw)
+
+        # Get instrument limit
+        name    = self._vars.get('instrument', tk.StringVar()).get()
+        profile = self.INSTRUMENT_PROFILES.get(name, {})
+        max_bw  = profile.get('max_bw_hz')
+        max_fs  = profile.get('max_fs_hz')
+
+        # Compute max channels that fit
+        if max_bw and sp > 0:
+            max_ch = max(1, int((max_bw - bw) / sp) + 1)
+        else:
+            max_ch = None
+
+        # Build status text
+        if max_bw is None:
+            status = f'Occupied span: {occupied/1e6:.1f} MHz   (no instrument limit set)'
+            color  = 'grey'
+        elif occupied <= max_bw:
+            pct    = occupied / max_bw * 100
+            status = (f'✓  Occupied: {occupied/1e6:.1f} MHz  /  '
+                      f'Limit: {max_bw/1e6:.0f} MHz  ({pct:.0f}% used)')
+            color  = 'green'
+        else:
+            over   = (occupied - max_bw) / 1e6
+            status = (f'⚠  EXCEEDS LIMIT by {over:.1f} MHz   '
+                      f'Occupied: {occupied/1e6:.1f} MHz  /  '
+                      f'Limit: {max_bw/1e6:.0f} MHz')
+            color  = 'red'
+
+        self._bw_status_label.config(text=status, fg=color)
+
+        # Max channels hint
+        if max_ch is not None:
+            fs_warn = ''
+            if max_fs and fs > max_fs:
+                fs_warn = (f'   ⚠ fs {fs/1e6:.0f} MHz > instrument max '
+                           f'{max_fs/1e6:.0f} MHz')
+            self._max_ch_label.config(
+                text=f'Max channels at {sp/1e6:.1f} MHz spacing: {max_ch}{fs_warn}',
+                fg='red' if fs_warn else '#444')
+        else:
+            self._max_ch_label.config(text='')
 
     def _on_type_change(self, _event=None):
         self._refresh_extra_fields(self._vars['waveform_type'].get())
@@ -1173,6 +1397,29 @@ class WaveformGUI:
             raise ValueError('File name cannot be empty.')
         if p['max_bin_mb'] < 0:
             raise ValueError('Max BIN size must be 0 (no limit) or a positive number.')
+
+        # Instrument bandwidth check
+        instr_name = self._vars['instrument'].get()
+        profile    = self.INSTRUMENT_PROFILES.get(instr_name, {})
+        max_bw     = profile.get('max_bw_hz')
+        max_fs     = profile.get('max_fs_hz')
+        occupied   = max(0, (p['n_channels'] - 1) * p['spacing_mhz'] * 1e6
+                           + p['bw_mhz'] * 1e6)
+        p['instrument']  = instr_name
+        p['max_bw_hz']   = max_bw
+        p['occupied_hz'] = occupied
+
+        if max_bw and occupied > max_bw:
+            over = (occupied - max_bw) / 1e6
+            raise ValueError(
+                f'Occupied bandwidth {occupied/1e6:.1f} MHz exceeds '
+                f'{instr_name} limit of {max_bw/1e6:.0f} MHz '
+                f'(by {over:.1f} MHz).\n\n'
+                f'Reduce channels, spacing, or per-channel bandwidth.')
+        if max_fs and p['fs_mhz'] * 1e6 > max_fs:
+            raise ValueError(
+                f'Sample rate {p["fs_mhz"]:.1f} MHz exceeds '
+                f'{instr_name} maximum of {max_fs/1e6:.0f} MHz.')
 
         # Extra type-specific fields
         p['extra'] = {}
