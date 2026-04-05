@@ -7,6 +7,34 @@
 
 ## Released
 
+### [v1.14] 2026-04-05 — Fix: figure windows frozen/unmoveable
+- `plt.show()` → `plt.show(block=False)` in `WaveformPlotter.plot_all()`.
+- Root cause: blocking `plt.show()` called inside tkinter's mainloop via `root.after()`
+  caused matplotlib (TkAgg backend) and tkinter to fight over the same Tk event loop.
+  Figure windows appeared but received no move/resize events — locked in place.
+- Fix hands event processing back to tkinter's mainloop so all figure windows are
+  fully interactive (move, resize, zoom, pan) alongside the designer GUI.
+
+### [v1.13] 2026-04-05 — Fix: GUI no longer closes after build
+- Removed `self.root.destroy()` from `_on_build()`.
+- Build + export now run in a `daemon` background thread (`threading.Thread`).
+- Build button disables and shows "Building…" during the run; re-enables on completion.
+- Status bar added below buttons: shows progress → green "Done — \<file\> (\<samples\>, \<ms\>)
+  Files saved to: \<dir\>" on success, red error message on failure.
+- Plots scheduled back onto the main thread after worker finishes (`root.after(0, ...)`).
+- "Cancel" renamed "Close" — window persists between builds.
+- 48 tests still pass.
+
+### [v1.12] 2026-04-05 — Auto-save waveform parameters to params/ subfolder
+- `WaveformExporter.save_all()` writes `params/<stem>_params.json` automatically
+  on every build — no checkbox, always on.
+- JSON contains: full `CompositeConfig`, all channel configs (enum as string),
+  derived stats (PAPR, total samples, duration, channel type counts), build timestamp,
+  output directory.
+- `load_params(path)` helper reconstructs `(CompositeConfig, [ChannelConfig])`
+  from any params file for exact waveform reproduction on another machine.
+- 6 new tests added (`TestParamsSave`) — 48 total, all pass.
+
 ### [v1.11] 2026-04-05 — Automated pytest test suite (42 tests)
 - `test_mxg_waveform_designer.py` added covering all 7 kernel functions, `CompositeBuilder`,
   Taylor/Chebwin tapers, pulse-Doppler modes, binary format roundtrip, `resample_to_max_mb`,
