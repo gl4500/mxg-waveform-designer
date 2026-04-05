@@ -2055,7 +2055,7 @@ class WaveformGUI:
             auto = self._auto_filename()
             self._vars['file_name'].set(auto)
             p['file_name'] = auto
-            cfg.base_file_name = os.path.join(p['out_dir'], auto)
+            cfg.base_file_name = os.path.join(p['out_dir'], 'params', auto)
 
         # Disable the button and show status while the build runs
         self._build_btn.config(state='disabled', text='Building…')
