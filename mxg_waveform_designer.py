@@ -911,9 +911,9 @@ class WaveformGUI:
         # ── First-generation MXG (N5182A) ───────────────────────────────────
         # Source: Keysight 5991-0192EN datasheet, Table 2
         'N5182A MXG  –  100 MHz BW  [1st gen]': {
-            'max_bw_hz':     100e6,    # 100 MHz max internal modulation BW (hardware filter)
+            'max_bw_hz':     100e6,    # 100 MHz max internal modulation BW
             'max_fs_hz':     125e6,    # 125 MSa/s max ARB sample rate
-            'rec_fs_hz':     100e6,    # recommend fs = max_bw so signal fits the filter
+            'rec_fs_hz':     125e6,    # 1.25 × 100 MHz = 125 MSa/s (capped at max_fs)
             'max_mem_msamp': 64,       # 8–64 MSa waveform memory
             'freq_range':    '250 kHz – 6 GHz',
             'notes':         '125 MSa/s max ARB | 100 MHz modulation BW | 8–64 MSa memory',
@@ -923,7 +923,7 @@ class WaveformGUI:
         'N5172B EXG  –  120 MHz BW  [X-Series]': {
             'max_bw_hz':     120e6,    # 120 MHz max internal modulation BW
             'max_fs_hz':     150e6,    # 150 MSa/s max ARB sample rate
-            'rec_fs_hz':     120e6,    # recommend fs = max_bw
+            'rec_fs_hz':     150e6,    # 1.25 × 120 MHz = 150 MSa/s (capped at max_fs)
             'max_mem_msamp': 512,      # 32–512 MSa waveform memory
             'freq_range':    '9 kHz – 6 GHz',
             'notes':         '150 MSa/s max ARB | 120 MHz modulation BW | up to 512 MSa memory',
@@ -931,7 +931,7 @@ class WaveformGUI:
         'N5172B EXG  –  200 MHz BW  (external I/Q)': {
             'max_bw_hz':     200e6,    # 200 MHz nominal 3 dB BW via ext I/Q
             'max_fs_hz':     150e6,    # ARB clock max (ext I/Q bypasses internal filter)
-            'rec_fs_hz':     150e6,
+            'rec_fs_hz':     150e6,    # capped at max_fs
             'max_mem_msamp': 512,
             'freq_range':    '9 kHz – 6 GHz',
             'notes':         'External I/Q input path; 200 MHz nominal 3 dB BW',
@@ -940,7 +940,7 @@ class WaveformGUI:
         'N5182B MXG  –  80 MHz BW  (standard)': {
             'max_bw_hz':     80e6,
             'max_fs_hz':     200e6,
-            'rec_fs_hz':     80e6,     # recommend fs = max_bw
+            'rec_fs_hz':     100e6,    # 1.25 × 80 MHz = 100 MSa/s
             'max_mem_msamp': 512,
             'freq_range':    '9 kHz – 6 GHz',
             'notes':         '200 MSa/s max ARB | 80 MHz modulation BW standard',
@@ -948,7 +948,7 @@ class WaveformGUI:
         'N5182B MXG  –  160 MHz BW  (opt 1EL)': {
             'max_bw_hz':     160e6,
             'max_fs_hz':     200e6,
-            'rec_fs_hz':     160e6,    # recommend fs = max_bw
+            'rec_fs_hz':     200e6,    # 1.25 × 160 MHz = 200 MSa/s (capped at max_fs)
             'max_mem_msamp': 512,
             'freq_range':    '9 kHz – 6 GHz',
             'notes':         'Option 1EL: 160 MHz wideband baseband | 200 MSa/s max ARB',
@@ -957,7 +957,7 @@ class WaveformGUI:
         'E8267D PSG  –  80 MHz BW  (standard)': {
             'max_bw_hz':     80e6,
             'max_fs_hz':     200e6,
-            'rec_fs_hz':     80e6,     # recommend fs = max_bw
+            'rec_fs_hz':     100e6,    # 1.25 × 80 MHz = 100 MSa/s
             'max_mem_msamp': 64,
             'freq_range':    '100 kHz – 44 GHz',
             'notes':         'High-performance PSG vector; 80 MHz modulation BW',
@@ -965,7 +965,7 @@ class WaveformGUI:
         'E8267D PSG  –  2 GHz BW  (opt H1E)': {
             'max_bw_hz':     2000e6,
             'max_fs_hz':     200e6,
-            'rec_fs_hz':     200e6,
+            'rec_fs_hz':     200e6,    # capped at max_fs
             'max_mem_msamp': 64,
             'freq_range':    '100 kHz – 44 GHz',
             'notes':         'Option H1E: 2 GHz BB via external I/Q',
@@ -973,7 +973,7 @@ class WaveformGUI:
         'E4438C ESG  –  80 MHz BW': {
             'max_bw_hz':     80e6,
             'max_fs_hz':     100e6,
-            'rec_fs_hz':     80e6,     # recommend fs = max_bw
+            'rec_fs_hz':     100e6,    # 1.25 × 80 MHz = 100 MSa/s (capped at max_fs)
             'max_mem_msamp': 32,
             'freq_range':    '250 kHz – 6 GHz',
             'notes':         'Legacy ESG; 100 MSa/s max ARB | 80 MHz modulation BW',
@@ -982,7 +982,7 @@ class WaveformGUI:
         'M9381A PXI VSG  –  160 MHz BW': {
             'max_bw_hz':     160e6,
             'max_fs_hz':     200e6,
-            'rec_fs_hz':     160e6,    # recommend fs = max_bw
+            'rec_fs_hz':     200e6,    # 1.25 × 160 MHz = 200 MSa/s (capped at max_fs)
             'max_mem_msamp': 256,
             'freq_range':    '1 MHz – 3 GHz',
             'notes':         'PXI modular VSG | 160 MHz modulation BW',
@@ -1294,36 +1294,21 @@ class WaveformGUI:
 
         self._bw_status_label.config(text=status, fg=color)
 
-        # Sample rate vs modulation BW check (separate from ARB clock limit)
+        # Sample rate vs ARB clock max check
         fs_warn = ''
-        fs_color = '#444'
-        if max_bw and fs > max_bw:
-            over_fs = (fs - max_bw) / 1e6
-            fs_warn = (f'⚠  Sample rate {fs/1e6:.0f} MHz > modulation BW limit '
-                       f'{max_bw/1e6:.0f} MHz  (+{over_fs:.0f} MHz) — '
-                       f'edges will be hardware-filtered.  Set fs ≤ {max_bw/1e6:.0f} MHz.')
-            fs_color = 'red'
-        elif max_fs and fs > max_fs:
+        fs_color = 'red'
+        if max_fs and fs > max_fs:
             fs_warn = (f'⚠  Sample rate {fs/1e6:.0f} MHz > ARB clock max '
-                       f'{max_fs/1e6:.0f} MHz')
-            fs_color = 'red'
+                       f'{max_fs/1e6:.0f} MHz — reduce sample rate.')
 
         # Max channels hint
         if max_ch is not None:
-            hint = f'Max channels at {sp/1e6:.1f} MHz spacing: {max_ch}'
-            if fs_warn:
-                self._max_ch_label.config(text=hint, fg='#444')
-                # show fs warning in its own label if available, else append
-                if hasattr(self, '_fs_warn_label') and self._fs_warn_label:
-                    self._fs_warn_label.config(text=fs_warn, fg=fs_color)
-            else:
-                self._max_ch_label.config(text=hint, fg='#444')
-                if hasattr(self, '_fs_warn_label') and self._fs_warn_label:
-                    self._fs_warn_label.config(text='', fg='#444')
-        else:
-            self._max_ch_label.config(text='')
-            if hasattr(self, '_fs_warn_label') and self._fs_warn_label:
-                self._fs_warn_label.config(text=fs_warn, fg=fs_color)
+            self._max_ch_label.config(
+                text=f'Max channels at {sp/1e6:.1f} MHz spacing: {max_ch}',
+                fg='#444')
+
+        if hasattr(self, '_fs_warn_label') and self._fs_warn_label:
+            self._fs_warn_label.config(text=fs_warn, fg=fs_color if fs_warn else '#444')
 
     def _on_type_change(self, _event=None):
         self._refresh_extra_fields(self._vars['waveform_type'].get())
@@ -1448,14 +1433,6 @@ class WaveformGUI:
                 f'{instr_name} limit of {max_bw/1e6:.0f} MHz '
                 f'(by {over:.1f} MHz).\n\n'
                 f'Reduce channels, spacing, or per-channel bandwidth.')
-        if max_bw and p['fs_mhz'] * 1e6 > max_bw:
-            over = p['fs_mhz'] - max_bw / 1e6
-            raise ValueError(
-                f'Sample rate {p["fs_mhz"]:.1f} MHz exceeds the '
-                f'{instr_name} modulation bandwidth of {max_bw/1e6:.0f} MHz '
-                f'(by {over:.1f} MHz).\n\n'
-                f'The hardware I/Q filter will cut off signal content beyond {max_bw/1e6:.0f} MHz.\n'
-                f'Set sample rate ≤ {max_bw/1e6:.0f} MHz.')
         if max_fs and p['fs_mhz'] * 1e6 > max_fs:
             raise ValueError(
                 f'Sample rate {p["fs_mhz"]:.1f} MHz exceeds '
