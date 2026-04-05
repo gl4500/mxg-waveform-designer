@@ -10,7 +10,7 @@ __pycache__/
 venv/
 env/
 
-# Build outputs — generated files, not source
+# Build outputs — generated files, not source (anywhere in the tree)
 *.bin
 *.mat
 *.csv
@@ -18,7 +18,7 @@ env/
 *_scpi.txt
 *_load.m
 *_validate.png
-params/
+**/params/
 
 # Jupyter / IPython
 .ipynb_checkpoints/

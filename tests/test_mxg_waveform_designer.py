@@ -14,7 +14,7 @@ import pytest
 # ── import the designer (headless — skip tkinter main) ───────────────────────
 # We import before tkinter is ever called; the GUI class is only instantiated
 # inside  if __name__ == '__main__'  so tests are safe.
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import mxg_waveform_designer as mwd
 from mxg_waveform_designer import (
     WaveformType, ChannelConfig, CompositeConfig, CompositeBuilder,
