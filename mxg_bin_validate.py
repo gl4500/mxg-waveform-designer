@@ -223,21 +223,26 @@ def plot_waveform(r: dict):
     ax3.legend(fontsize=8)
     ax3.grid(True, alpha=0.3)
 
-    # ── Power spectrum ───────────────────────────────────────────────────────
+    # ── Power spectral density (Welch averaged) ──────────────────────────────
     ax4 = fig.add_subplot(gs[2, :])
-    iq_c  = (I + 1j * Q)
-    n_fft = min(len(iq_c), 8192)
-    win   = np.hanning(n_fft)
-    spec  = np.fft.fftshift(np.fft.fft(iq_c[:n_fft] * win, n_fft))
-    psd   = 20 * np.log10(np.abs(spec) / n_fft + 1e-12)
-    freq  = np.fft.fftshift(np.fft.fftfreq(n_fft, d=1/fs)) / 1e6
+    iq_c   = (I + 1j * Q)
+    # nperseg: use 8192 or 1/8 of the signal, whichever is smaller, min 256
+    nperseg = max(256, min(8192, len(iq_c) // 8))
+    from scipy.signal import welch
+    f_w, psd_w = welch(iq_c, fs=fs, nperseg=nperseg, noverlap=nperseg // 2,
+                       nfft=nperseg * 2, return_onesided=False,
+                       scaling='density', detrend=False)
+    f_w   = np.fft.fftshift(f_w)   / 1e6
+    psd_w = np.fft.fftshift(psd_w)
+    psd_db = 10 * np.log10(np.abs(psd_w) + 1e-12)
 
-    ax4.plot(freq, psd, color='royalblue', linewidth=0.7)
+    ax4.plot(f_w, psd_db, color='royalblue', linewidth=0.7)
     ax4.set_xlabel('Frequency (MHz, baseband)')
-    ax4.set_ylabel('Power (dBFS)')
-    ax4.set_title('Power Spectrum (single-window FFT)')
+    ax4.set_ylabel('PSD (dB/Hz)')
+    ax4.set_title(f'Power Spectral Density — Welch (nperseg={nperseg}, '
+                  f'{len(iq_c)//nperseg} averages)')
     ax4.grid(True, alpha=0.3)
-    ax4.set_xlim(freq[0], freq[-1])
+    ax4.set_xlim(f_w[0], f_w[-1])
 
     plt.savefig(r['path'].replace('.bin', '_validate.png'), dpi=150, bbox_inches='tight')
     print(f'  Plot saved: {r["path"].replace(".bin", "_validate.png")}')

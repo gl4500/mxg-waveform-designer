@@ -45,7 +45,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from fractions import Fraction
 from typing import List, Optional, Dict, Any
+import os
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,10 +130,13 @@ class CompositeConfig:
     window_type:     str    = 'hann'  # 'hann' | 'hamming' | 'tukey' | 'none'
     tukey_alpha:     float  = 0.25
 
-    # Optional cosine-taper amplitude roll-off across channel bank
+    # Amplitude taper across channel bank
     use_amp_taper:   bool   = False
-    edge_amp_scale:  float  = 0.75
-    center_amp_scale:float  = 1.00
+    taper_type:      str    = 'cosine'  # 'cosine' | 'taylor' | 'chebwin'
+    taylor_nbar:     int    = 4         # Taylor: adjacent equal sidelobes (typ 4–6)
+    taylor_sll:      float  = -30.0    # Taylor/Chebwin: sidelobe level [dB] (negative)
+    edge_amp_scale:  float  = 0.75     # cosine taper only: edge relative amplitude
+    center_amp_scale:float  = 1.00     # cosine taper only: centre relative amplitude
 
     # Random phase per channel for PAPR reduction
     use_random_phase:bool   = True
@@ -143,11 +148,19 @@ class CompositeConfig:
     # RF centre – metadata / documentation only
     rf_center_hz:    float  = 2.4e9
 
+    # Pulse-Doppler / staggered PRI
+    use_pulse_doppler: bool  = False
+    pd_pri_step_s:     float = 1e-6   # linear PRI increment per pulse [s]
+    pd_mode:           str   = 'stagger'  # 'stagger' | 'jitter'
+    pd_jitter_seed:    int   = 42
+
     # File output
     base_file_name:  str    = 'mxg_composite'
     save_mat:        bool   = True
     save_csv:        bool   = True
     save_bin:        bool   = True
+    save_vsa89600:   bool   = False   # Keysight 89600 VSA .mat
+    save_m_script:   bool   = False   # MATLAB .m reconstruction script
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -445,13 +458,17 @@ class CompositeBuilder:
             composite_pulse += s
             meta_rows.append(self._channel_metadata(ch_idx, ch, phi, amp))
 
-        # insert pulse into PRI
+        # insert pulse into PRI template
         pulse_start = int(round(cfg.pulse_offset_s * cfg.fs))
-        one_pri     = np.zeros(NsPRI, dtype=complex)
-        one_pri[pulse_start:pulse_start + NsPulse] = composite_pulse
+        one_pri_base = np.zeros(NsPRI, dtype=complex)
+        one_pri_base[pulse_start:pulse_start + NsPulse] = composite_pulse
 
-        # tile into full pulse train
-        iq = np.tile(one_pri, cfg.num_pulses)
+        # build pulse train (uniform or pulse-Doppler staggered PRI)
+        if not cfg.use_pulse_doppler:
+            iq = np.tile(one_pri_base, cfg.num_pulses)
+        else:
+            iq = self._build_pd_train(composite_pulse, pulse_start,
+                                      NsPulse, NsPRI)
 
         # normalise
         iq, stats = self._normalise(iq)
@@ -495,11 +512,28 @@ class CompositeBuilder:
         n   = len(self.channels)
         if not cfg.use_amp_taper:
             return np.ones(n)
-        x = np.linspace(-1, 1, n)
-        w = (cfg.edge_amp_scale
-             + (cfg.center_amp_scale - cfg.edge_amp_scale)
-             * np.cos(np.pi * x / 2) ** 2)
-        return w / w.max()
+        tt = cfg.taper_type.lower()
+        if tt == 'taylor':
+            # True Taylor window: concentrates energy at centre, suppresses edges
+            # to cfg.taylor_sll dB. nbar controls the number of constant-level
+            # inner sidelobes. scipy requires sll as a positive dB value.
+            w = sig.windows.taylor(n, nbar=cfg.taylor_nbar,
+                                   sll=abs(cfg.taylor_sll), norm=True)
+            w = np.abs(w).astype(float)
+        elif tt == 'chebwin':
+            # Chebyshev window: equiripple sidelobes at exactly |sll| dB below peak
+            w = sig.windows.chebwin(n, at=abs(cfg.taylor_sll))
+            w = np.abs(w).astype(float)
+        else:
+            # Legacy cosine-squared taper (default)
+            x = np.linspace(-1, 1, n)
+            w = (cfg.edge_amp_scale
+                 + (cfg.center_amp_scale - cfg.edge_amp_scale)
+                 * np.cos(np.pi * x / 2) ** 2)
+        peak = w.max()
+        if peak == 0:
+            return np.ones(n)
+        return w / peak
 
     def _channel_phases(self) -> np.ndarray:
         cfg = self.cfg
@@ -522,6 +556,32 @@ class CompositeBuilder:
         row.update({f'param_{k}': v for k, v in ch.params.items()
                     if not isinstance(v, (list, np.ndarray))})
         return row
+
+    def _build_pd_train(self, composite_pulse: np.ndarray,
+                        pulse_start: int, NsPulse: int,
+                        base_NsPRI: int) -> np.ndarray:
+        """
+        Build a pulse train with per-pulse varying PRI (pulse-Doppler / stagger).
+
+        pd_mode = 'stagger' – PRI increases linearly by pd_pri_step_s each pulse.
+                              Produces a Doppler-unambiguous PRF stagger.
+        pd_mode = 'jitter'  – PRI is randomly perturbed ±pd_pri_step_s around base.
+                              Reduces range-Doppler coupling in dense environments.
+        """
+        cfg    = self.cfg
+        step_n = int(round(cfg.pd_pri_step_s * cfg.fs))
+        rng    = np.random.default_rng(cfg.pd_jitter_seed)
+        frames = []
+        for i in range(cfg.num_pulses):
+            if cfg.pd_mode == 'stagger':
+                pri_n = base_NsPRI + i * step_n
+            else:  # jitter
+                delta = int(rng.integers(-step_n, step_n + 1))
+                pri_n = max(NsPulse + pulse_start + 1, base_NsPRI + delta)
+            frame = np.zeros(pri_n, dtype=complex)
+            frame[pulse_start:pulse_start + NsPulse] = composite_pulse
+            frames.append(frame)
+        return np.concatenate(frames)
 
     def _normalise(self, iq: np.ndarray):
         peak = np.max(np.abs(iq))
@@ -574,14 +634,14 @@ class WaveformPlotter:
         self.fs = fs
 
     def plot_all(self, iq: np.ndarray, channels: List[ChannelConfig],
-                 title_prefix: str = ''):
-        """Convenience: produce all standard plots."""
-        cfg     = self.fs
-        NsPRI   = len(iq)   # one-PRI length not directly available; use full for spectrum
-        t_all   = np.arange(len(iq)) / self.fs
+                 title_prefix: str = '', pri_samples: Optional[int] = None):
+        """Convenience: produce all standard plots.
 
-        # For time-domain plots grab first PRI
-        pri_samps = self._detect_pri(iq)
+        pri_samples : if provided (from CompositeConfig), use directly as the
+                      PRI window for the time-domain plot.  Otherwise, falls
+                      back to envelope-autocorrelation detection.
+        """
+        pri_samps = pri_samples if pri_samples else self._detect_pri(iq)
         one_pri   = iq[:pri_samps]
         t_pri     = np.arange(pri_samps) / self.fs
 
@@ -661,8 +721,36 @@ class WaveformPlotter:
 
     @staticmethod
     def _detect_pri(iq: np.ndarray) -> int:
-        """Heuristic: return length of iq (single-PRI) or a capped slice."""
-        return min(len(iq), 2 ** 17)   # cap at ~0.87M samples for display
+        """
+        Estimate PRI length from envelope autocorrelation.
+
+        Computes the normalised autocorrelation of the amplitude envelope over
+        the first 2^18 samples, then finds the first prominent peak after a
+        minimum lag of 1 % of the search window.  Falls back to 2^17 if no
+        clear period is found (e.g. CW, single-pulse).
+        """
+        cap  = min(len(iq), 2 ** 18)
+        env  = np.abs(iq[:cap]).astype(np.float64)
+        env -= env.mean()
+        if env.std() < 1e-12:
+            return min(len(iq), 2 ** 17)
+
+        # Correlate against first quarter to keep memory bounded
+        search_len = cap // 4
+        corr = np.correlate(env, env[:search_len], mode='valid')
+        corr = corr / (corr[0] + 1e-12)   # normalise to 1 at lag-0
+
+        min_lag = max(8, search_len // 100)
+        peaks   = []
+        # Simple peak finder: local max above 0.2 threshold
+        c = corr[min_lag:]
+        for i in range(1, len(c) - 1):
+            if c[i] > c[i - 1] and c[i] > c[i + 1] and c[i] > 0.2:
+                peaks.append(i + min_lag)
+                break   # first peak is the fundamental period
+        if peaks:
+            return int(peaks[0])
+        return min(len(iq), 2 ** 17)   # fallback
 
     @staticmethod
     def _freq_bounds(channels: List[ChannelConfig], margin: float = 0.1):
@@ -752,6 +840,17 @@ class WaveformExporter:
             print(f'  {base}_mxg_{int(limit_mb)}mb.bin   ({small_mb:.2f} MB)  '
                   f'@ {fs_small/1e6:.3f} MHz  – load this onto MXG')
             print(f'  {base}_mxg_{int(limit_mb)}mb_info.txt  – MXG sample rate note')
+            # SCPI sidecar (item 4)
+            self._save_scpi_sidecar(base, limit_mb, fs_small, config)
+            print(f'  {base}_mxg_{int(limit_mb)}mb_scpi.txt  – N5182A SCPI load commands')
+
+        if config.save_vsa89600:
+            self._save_vsa89600(base, iq, config)
+            print(f'  {base}_vsa89600.mat  – Keysight 89600 VSA import')
+
+        if config.save_m_script:
+            self._save_m_script(base, config)
+            print(f'  {base}_load.m  – MATLAB reconstruction & SCPI script')
 
     # ── format writers ───────────────────────────────────────────────────────
 
@@ -788,6 +887,151 @@ class WaveformExporter:
         buf[1::2] = np.clip(Q * scale, -32767, 32767).astype('>i2')
         buf.tofile(f'{base}.bin')
 
+    @staticmethod
+    def _save_scpi_sidecar(base: str, limit_mb: float,
+                           fs_small: float, cfg) -> None:
+        """
+        Write a .scpi.txt file containing the exact SCPI command sequence
+        needed to transfer the 4 MB .bin file to an N5182A and play it back.
+
+        The file transfer uses the IEEE 488.2 block-data format via MMEM:DATA.
+        Users can send these commands via NI-VISA, PyVISA, or Keysight IO Libraries.
+        """
+        wfm_name = os.path.basename(base) + f'_mxg_{int(limit_mb)}mb'
+        bin_file  = wfm_name + '.bin'
+        scpi_file = f'{base}_mxg_{int(limit_mb)}mb_scpi.txt'
+
+        lines = [
+            '# N5182A MXG — SCPI waveform load sequence',
+            '# ==========================================',
+            '# Replace <RESOURCE> with your VISA address, e.g.:',
+            '#   TCPIP0::192.168.1.100::5025::SOCKET',
+            '#   GPIB0::19::INSTR',
+            '#',
+            '# Step 1 – Transfer the .bin file to instrument volatile memory',
+            f'#   (Python / PyVISA example)',
+            '#',
+            '# import pyvisa',
+            '# rm  = pyvisa.ResourceManager()',
+            '# inst = rm.open_resource("<RESOURCE>")',
+            '# inst.timeout = 60000',
+            f'# with open(r"{bin_file}", "rb") as fh:',
+            '#     data = fh.read()',
+            '# n = len(data)',
+            '# header = f"#{len(str(n))}{n}".encode()',
+            f'# inst.write_raw(b\'MMEM:DATA "WFM1:{wfm_name}",\' + header + data)',
+            '#',
+            '# Step 2 – Select waveform and set sample rate',
+            f'# inst.write(\'WGEN:ARB:WAVEFORM "WFM1:{wfm_name}"\')',
+            f'# inst.write(f\'WGEN:ARB:SRAT {fs_small:.6e}\')',
+            '#',
+            '# Step 3 – Enable ARB output',
+            "# inst.write(':WGEN:MOD:TYPE ARB')",
+            "# inst.write(':OUTPUT:STATE ON')",
+            '#',
+            '# --- Raw SCPI (for manual use via IO Libraries Suite) ---',
+            f'WGEN:ARB:WAVEFORM "WFM1:{wfm_name}"',
+            f'WGEN:ARB:SRAT {fs_small:.6e}',
+            ':WGEN:MOD:TYPE ARB',
+            ':OUTPUT:STATE ON',
+        ]
+        with open(scpi_file, 'w') as fh:
+            fh.write('\n'.join(lines) + '\n')
+
+    @staticmethod
+    def _save_vsa89600(base: str, iq: np.ndarray, cfg) -> None:
+        """
+        Save a Keysight 89600 VSA-compatible .mat file.
+
+        The 89600 VSA 'Load Data File' importer expects:
+          Y      – complex double column vector (N×1)
+          XDelta – sample period [s]  = 1 / fs
+          XStart – start time [s]     = 0
+          XUnit  – time unit string   = 'sec'
+          YUnit  – amplitude unit     = 'V'
+
+        Optional hint for RF centre frequency (shown in VSA carrier display):
+          InputCenter – RF centre [Hz]
+        """
+        mat_path = f'{base}_vsa89600.mat'
+        sio.savemat(mat_path, {
+            'Y':           iq.astype(np.complex128).reshape(-1, 1),
+            'XDelta':      1.0 / cfg.fs,
+            'XStart':      0.0,
+            'XUnit':       'sec',
+            'YUnit':       'V',
+            'InputCenter': cfg.rf_center_hz,
+        })
+
+    @staticmethod
+    def _save_m_script(base: str, cfg) -> None:
+        """
+        Generate a MATLAB .m script that:
+          1. Loads the .mat archive and reconstructs the IQ waveform.
+          2. Plots a spectrogram.
+          3. Shows how to download the waveform to an N5182A using MATLAB's
+             Instrument Control Toolbox (visadev / tcpclient).
+        """
+        mat_stem  = os.path.basename(base)
+        wfm_name  = mat_stem + '_mxg_4mb'
+        script    = f'{base}_load.m'
+
+        code = f"""\
+% {mat_stem}_load.m  —  Auto-generated by MXG Waveform Designer
+% Loads the waveform archive, plots a spectrogram, and optionally
+% downloads to an N5182A via MATLAB Instrument Control Toolbox.
+
+%% ── 1. Load archive ────────────────────────────────────────────
+d  = load('{mat_stem}.mat');
+iq = d.iq;          % complex double, full-resolution
+fs = d.fs;          % sample rate [Hz]
+
+fprintf('Loaded %d samples @ %.3f MHz\\n', numel(iq), fs/1e6);
+
+%% ── 2. Spectrogram ─────────────────────────────────────────────
+figure('Name','MXG Waveform Spectrogram');
+spectrogram(iq, 1024, 768, 2048, fs, 'centered', 'yaxis', 'power');
+title('{mat_stem}  –  Spectrogram');
+colormap('hot');
+
+%% ── 3. Download to N5182A (requires Instrument Control Toolbox) ─
+% Edit the IP address and waveform name before running this section.
+
+INSTR_IP   = '192.168.1.100';   % ← change to your instrument IP
+INSTR_PORT = 5025;
+WFM_NAME   = '{wfm_name}';
+BIN_FILE   = '{wfm_name}.bin';
+FS_MXG     = {cfg.fs:.6e};   % set on instrument after load
+
+% Read binary file
+fid  = fopen(BIN_FILE, 'rb');
+data = fread(fid, Inf, 'int16', 0, 'b');  % big-endian int16
+fclose(fid);
+
+n_bytes = numel(data) * 2;
+header  = sprintf('#%d%d', numel(num2str(n_bytes)), n_bytes);
+
+% Open connection
+t = tcpclient(INSTR_IP, INSTR_PORT);
+t.Timeout = 60;
+
+% Transfer waveform
+raw_data  = typecast(int16(data), 'uint8');
+writeline(t, sprintf('MMEM:DATA "WFM1:%s",%s', WFM_NAME, header));
+write(t, raw_data);
+
+% Configure and play
+writeline(t, sprintf('WGEN:ARB:WAVEFORM "WFM1:%s"', WFM_NAME));
+writeline(t, sprintf('WGEN:ARB:SRAT %.6e',  FS_MXG));
+writeline(t, ':WGEN:MOD:TYPE ARB');
+writeline(t, ':OUTPUT:STATE ON');
+
+fprintf('Waveform loaded and playing on N5182A at %s\\n', INSTR_IP);
+clear t;
+"""
+        with open(script, 'w', encoding='utf-8') as fh:
+            fh.write(code)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RESAMPLER UTILITY
@@ -817,9 +1061,9 @@ def resample_to_max_mb(iq: np.ndarray, fs: float,
         print(f'BIN size already within {max_mb} MB – no resampling needed.')
         return iq, fs
 
-    ratio    = max_samples / current_samples
-    new_fs   = fs * ratio
-    new_n    = max_samples
+    ratio  = max_samples / current_samples
+    new_fs = fs * ratio
+    new_n  = max_samples
 
     print(f'\nResampling BIN for size limit:')
     print(f'  Original : {current_samples:,} samples  @ {fs/1e6:.3f} MHz  '
@@ -835,11 +1079,21 @@ def resample_to_max_mb(iq: np.ndarray, fs: float,
         print(f'  WARNING: new fs ({new_fs/1e6:.1f} MHz) may be close to or '
               f'below the signal bandwidth – check for aliasing.')
 
-    # scipy.signal.resample handles complex arrays natively
-    iq_out = sig.resample(iq, new_n)
+    # Polyphase resampler — applies Kaiser FIR anti-alias filter before decimation,
+    # avoiding the Gibbs ringing that scipy.signal.resample (FFT-based) produces
+    # at pulse edges.  p/q are found via rational approximation of the target ratio.
+    frac = Fraction(new_n, current_samples).limit_denominator(1000)
+    p, q = frac.numerator, frac.denominator
+    iq_out = sig.resample_poly(iq, p, q, window=('kaiser', 5.0))
 
-    print(f'  Done.  New fs = {new_fs/1e6:.3f} MHz  '
-          f'→ set this as the MXG sample rate.\n')
+    # Trim or zero-pad by at most 1 sample to hit the exact byte target
+    if len(iq_out) > new_n:
+        iq_out = iq_out[:new_n]
+    elif len(iq_out) < new_n:
+        iq_out = np.append(iq_out, np.zeros(new_n - len(iq_out), dtype=complex))
+
+    print(f'  Done.  p={p}  q={q}  actual samples={len(iq_out):,}')
+    print(f'  New fs = {new_fs/1e6:.3f} MHz  → set this as the MXG sample rate.\n')
     return iq_out, new_fs
 
 
@@ -867,8 +1121,10 @@ def run(config: CompositeConfig, channels: List[ChannelConfig],
     iq, table = builder.build()
 
     if plot:
+        NsPRI = int(round(config.fs * config.pri_s))
         plotter = WaveformPlotter(config.fs)
-        plotter.plot_all(iq, channels, title_prefix=config.base_file_name)
+        plotter.plot_all(iq, channels, title_prefix=config.base_file_name,
+                         pri_samples=NsPRI)
 
     exporter = WaveformExporter()
     exporter.save_all(iq, config, table, max_bin_mb=max_bin_mb)
@@ -1027,6 +1283,7 @@ class WaveformGUI:
         self._tab_channels(nb)
         self._tab_window(nb)
         self._tab_output(nb)
+        self._tab_scpi(nb)
 
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(fill='x', padx=8, pady=(0, 8))
@@ -1081,15 +1338,49 @@ class WaveformGUI:
         # Attach live BW check to fs field changes
         self._vars['fs_mhz'].trace_add('write', lambda *_: self._update_bw_status())
 
+    # ── channel bank list (for multi-group / mixed-type support) ────────────
+    # Each entry: dict with keys waveform_type, n_channels, spacing_mhz,
+    #             bw_mhz, up_chirp, extra (dict of type-specific params)
+    _channel_banks: list = []
+
     def _tab_channels(self, nb):
         f = ttk.Frame(nb, padding=10)
         nb.add(f, text='Channels')
 
-        # Waveform type dropdown
-        ttk.Label(f, text='Waveform type').grid(row=0, column=0, sticky='w', pady=2)
+        # ── Bank list ────────────────────────────────────────────────────────
+        list_frame = ttk.LabelFrame(f, text='Channel banks  (one row = one uniform group)', padding=6)
+        list_frame.grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 6))
+
+        cols = ('Type', 'N', 'Spacing (MHz)', 'BW (MHz)', 'Up-chirp', 'Extra')
+        self._bank_tree = ttk.Treeview(list_frame, columns=cols,
+                                       show='headings', height=4)
+        for c in cols:
+            self._bank_tree.heading(c, text=c)
+            self._bank_tree.column(c, width=90, anchor='center')
+        self._bank_tree.column('Extra', width=160)
+        self._bank_tree.pack(side='left', fill='x', expand=True)
+
+        sb = ttk.Scrollbar(list_frame, orient='vertical',
+                           command=self._bank_tree.yview)
+        sb.pack(side='right', fill='y')
+        self._bank_tree.configure(yscrollcommand=sb.set)
+
+        btn_row = ttk.Frame(f)
+        btn_row.grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 6))
+        ttk.Button(btn_row, text='Add bank',
+                   command=self._add_bank).pack(side='left', padx=(0, 4))
+        ttk.Button(btn_row, text='Remove selected',
+                   command=self._remove_bank).pack(side='left')
+
+        # ── New bank entry form ──────────────────────────────────────────────
+        entry_frame = ttk.LabelFrame(f, text='New bank parameters', padding=6)
+        entry_frame.grid(row=2, column=0, columnspan=3, sticky='ew')
+
+        ttk.Label(entry_frame, text='Waveform type').grid(
+            row=0, column=0, sticky='w', pady=2)
         wf_types = [t.name for t in WaveformType]
         self._vars['waveform_type'] = tk.StringVar(value='LFM')
-        cb = ttk.Combobox(f, textvariable=self._vars['waveform_type'],
+        cb = ttk.Combobox(entry_frame, textvariable=self._vars['waveform_type'],
                           values=wf_types, state='readonly', width=14)
         cb.grid(row=0, column=1, sticky='w', pady=2)
         cb.bind('<<ComboboxSelected>>', self._on_type_change)
@@ -1099,20 +1390,25 @@ class WaveformGUI:
             ('Chan spacing (MHz)', 'spacing_mhz',  3.0),
             ('Bandwidth/ch (MHz)', 'bw_mhz',       2.0),
         ]
-        self._make_fields(f, fields, start_row=1)
+        self._make_fields(entry_frame, fields, start_row=1)
 
-        # Attach live BW check whenever channel params change
         for key in ('n_channels', 'spacing_mhz', 'bw_mhz'):
             self._vars[key].trace_add('write', lambda *_: self._update_bw_status())
 
-        # Up/down chirp checkbox
         self._vars['up_chirp'] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text='Up-chirp', variable=self._vars['up_chirp']
+        ttk.Checkbutton(entry_frame, text='Up-chirp',
+                        variable=self._vars['up_chirp']
                         ).grid(row=4, column=0, columnspan=2, sticky='w', pady=2)
+
+        # Frame for dynamic waveform-type extras
+        self._extra_frame = ttk.LabelFrame(entry_frame, text='Waveform options', padding=6)
+        self._extra_frame.grid(row=5, column=0, columnspan=2,
+                               sticky='ew', pady=(6, 0))
+        self._refresh_extra_fields('LFM')
 
         # ── Live bandwidth status bar ────────────────────────────────────────
         bw_frame = ttk.LabelFrame(f, text='Bandwidth check', padding=6)
-        bw_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=(8, 0))
+        bw_frame.grid(row=3, column=0, columnspan=3, sticky='ew', pady=(8, 0))
 
         self._bw_status_label = tk.Label(
             bw_frame,
@@ -1121,8 +1417,7 @@ class WaveformGUI:
             fg='grey', anchor='w', justify='left')
         self._bw_status_label.pack(fill='x')
 
-        self._max_ch_label = tk.Label(
-            bw_frame, text='', fg='#444', anchor='w')
+        self._max_ch_label = tk.Label(bw_frame, text='', fg='#444', anchor='w')
         self._max_ch_label.pack(fill='x')
 
         self._fs_warn_label = tk.Label(
@@ -1130,11 +1425,9 @@ class WaveformGUI:
             font=('Segoe UI', 9, 'bold'), anchor='w', justify='left')
         self._fs_warn_label.pack(fill='x')
 
-        # Frame for dynamic waveform-type extras
-        self._extra_frame = ttk.LabelFrame(f, text='Waveform options', padding=6)
-        self._extra_frame.grid(row=6, column=0, columnspan=2,
-                               sticky='ew', pady=(6, 0))
-        self._refresh_extra_fields('LFM')
+        # Seed the bank list with one default LFM bank
+        self._channel_banks = []
+        self._add_default_bank()
 
     def _tab_window(self, nb):
         f = ttk.Frame(nb, padding=10)
@@ -1168,6 +1461,21 @@ class WaveformGUI:
         ttk.Checkbutton(f, text='Channel amplitude taper',
                         variable=self._vars['use_amp_taper']
                         ).grid(row=6, column=0, columnspan=2, sticky='w', pady=2)
+
+        ttk.Label(f, text='Taper type').grid(row=7, column=0, sticky='w', pady=2)
+        self._vars['taper_type'] = tk.StringVar(value='cosine')
+        ttk.Combobox(f, textvariable=self._vars['taper_type'],
+                     values=['cosine', 'taylor', 'chebwin'],
+                     state='readonly', width=14
+                     ).grid(row=7, column=1, sticky='w', pady=2)
+
+        taper_fields = [
+            ('Taylor nbar',     'taylor_nbar',  4),
+            ('SLL (dB, neg.)',  'taylor_sll',  -30.0),
+        ]
+        self._make_fields(f, taper_fields, start_row=8)
+        ttk.Label(f, text='nbar/SLL used for taylor & chebwin',
+                  foreground='grey').grid(row=10, column=0, columnspan=2, sticky='w')
 
     def _tab_output(self, nb):
         f = ttk.Frame(nb, padding=10)
@@ -1214,10 +1522,134 @@ class WaveformGUI:
         ttk.Label(f, text='  always produces full + resampled pair', foreground='grey'
                   ).grid(row=6, column=2, sticky='w')
 
+        self._vars['save_vsa89600'] = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text='Save 89600 VSA .mat  (Keysight VSA import)',
+                        variable=self._vars['save_vsa89600']
+                        ).grid(row=7, column=0, columnspan=3, sticky='w')
+
+        self._vars['save_m_script'] = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text='Save MATLAB .m script  (load + SCPI download)',
+                        variable=self._vars['save_m_script']
+                        ).grid(row=8, column=0, columnspan=3, sticky='w')
+
         self._vars['show_plots'] = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text='Show diagnostic plots',
                         variable=self._vars['show_plots']
-                        ).grid(row=7, column=0, columnspan=3, sticky='w', pady=(4, 0))
+                        ).grid(row=9, column=0, columnspan=3, sticky='w', pady=(4, 0))
+
+    def _tab_scpi(self, nb):
+        """SCPI / PyVISA direct-download tab."""
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text='SCPI')
+
+        ttk.Label(f, text=(
+            'Download the most recently built _mxg_4mb.bin directly to\n'
+            'an N5182A over LAN or GPIB using PyVISA.\n'
+            'PyVISA must be installed:  pip install pyvisa pyvisa-py'
+        ), foreground='#444').grid(row=0, column=0, columnspan=3,
+                                   sticky='w', pady=(0, 8))
+
+        ttk.Label(f, text='VISA resource').grid(row=1, column=0, sticky='w', pady=2)
+        self._vars['visa_resource'] = tk.StringVar(
+            value='TCPIP0::192.168.1.100::5025::SOCKET')
+        ttk.Entry(f, textvariable=self._vars['visa_resource'], width=38
+                  ).grid(row=1, column=1, columnspan=2, sticky='ew', pady=2)
+
+        ttk.Label(f, text='Waveform name').grid(row=2, column=0, sticky='w', pady=2)
+        self._vars['scpi_wfm_name'] = tk.StringVar(value='mxg_waveform_mxg_4mb')
+        ttk.Entry(f, textvariable=self._vars['scpi_wfm_name'], width=28
+                  ).grid(row=2, column=1, sticky='ew', pady=2)
+
+        ttk.Label(f, text='Sample rate (MHz)').grid(row=3, column=0, sticky='w', pady=2)
+        self._vars['scpi_fs_mhz'] = tk.StringVar(value='125.0')
+        ttk.Entry(f, textvariable=self._vars['scpi_fs_mhz'], width=14
+                  ).grid(row=3, column=1, sticky='w', pady=2)
+
+        ttk.Label(f, text='Bin file path').grid(row=4, column=0, sticky='w', pady=2)
+        self._vars['scpi_bin_path'] = tk.StringVar(value='')
+        ttk.Entry(f, textvariable=self._vars['scpi_bin_path'], width=34
+                  ).grid(row=4, column=1, sticky='ew', pady=2)
+        ttk.Button(f, text='Browse…',
+                   command=self._browse_bin).grid(row=4, column=2, padx=4)
+
+        sep = ttk.Separator(f, orient='horizontal')
+        sep.grid(row=5, column=0, columnspan=3, sticky='ew', pady=8)
+
+        ttk.Button(f, text='Connect & Download to N5182A',
+                   command=self._do_scpi_download
+                   ).grid(row=6, column=0, columnspan=3, sticky='w')
+
+        self._scpi_status = tk.Label(f, text='', fg='grey',
+                                     font=('Segoe UI', 9), anchor='w',
+                                     justify='left', wraplength=400)
+        self._scpi_status.grid(row=7, column=0, columnspan=3,
+                               sticky='w', pady=(6, 0))
+
+    def _browse_bin(self):
+        path = filedialog.askopenfilename(
+            title='Select .bin file',
+            filetypes=[('Binary waveform', '*.bin'), ('All files', '*.*')])
+        if path:
+            self._vars['scpi_bin_path'].set(path)
+
+    def _do_scpi_download(self):
+        """Transfer the .bin file to the N5182A via PyVISA MMEM:DATA."""
+        try:
+            import pyvisa
+        except ImportError:
+            self._scpi_status.config(
+                text='PyVISA not installed.\n'
+                     'Run:  pip install pyvisa pyvisa-py',
+                fg='red')
+            return
+
+        resource = self._vars['visa_resource'].get().strip()
+        wfm_name = self._vars['scpi_wfm_name'].get().strip()
+        bin_path = self._vars['scpi_bin_path'].get().strip()
+
+        try:
+            fs_hz = float(self._vars['scpi_fs_mhz'].get()) * 1e6
+        except ValueError:
+            self._scpi_status.config(text='Invalid sample rate.', fg='red')
+            return
+
+        if not bin_path or not os.path.isfile(bin_path):
+            self._scpi_status.config(
+                text='Bin file not found. Browse to select it.', fg='red')
+            return
+
+        self._scpi_status.config(text='Connecting…', fg='#555')
+        self.root.update_idletasks()
+
+        try:
+            rm   = pyvisa.ResourceManager()
+            inst = rm.open_resource(resource)
+            inst.timeout = 120_000   # 2 min for large transfers
+
+            with open(bin_path, 'rb') as fh:
+                data = fh.read()
+            n      = len(data)
+            header = f'#{len(str(n))}{n}'.encode()
+
+            self._scpi_status.config(
+                text=f'Transferring {n/1e6:.2f} MB to {resource}…', fg='#555')
+            self.root.update_idletasks()
+
+            inst.write_raw(
+                f'MMEM:DATA "WFM1:{wfm_name}",'.encode() + header + data)
+
+            inst.write(f'WGEN:ARB:WAVEFORM "WFM1:{wfm_name}"')
+            inst.write(f'WGEN:ARB:SRAT {fs_hz:.6e}')
+            inst.write(':WGEN:MOD:TYPE ARB')
+            inst.write(':OUTPUT:STATE ON')
+            inst.close()
+
+            self._scpi_status.config(
+                text=f'Done.  Waveform "{wfm_name}" loaded @ {fs_hz/1e6:.3f} MHz.',
+                fg='green')
+        except Exception as exc:
+            self._scpi_status.config(
+                text=f'Transfer failed:\n{exc}', fg='red')
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -1312,6 +1744,64 @@ class WaveformGUI:
         if hasattr(self, '_fs_warn_label') and self._fs_warn_label:
             self._fs_warn_label.config(text=fs_warn, fg=fs_color if fs_warn else '#444')
 
+    # ── bank management ───────────────────────────────────────────────────────
+
+    def _add_default_bank(self):
+        """Add a default 40-channel LFM bank on first launch."""
+        bank = {'waveform_type': 'LFM', 'n_channels': 40,
+                'spacing_mhz': 3.0, 'bw_mhz': 2.0,
+                'up_chirp': True, 'extra': {}}
+        self._channel_banks.append(bank)
+        self._refresh_bank_tree()
+
+    def _add_bank(self):
+        """Read the entry form and append a new bank to the list."""
+        try:
+            n   = int(float(self._vars['n_channels'].get()))
+            sp  = float(self._vars['spacing_mhz'].get())
+            bw  = float(self._vars['bw_mhz'].get())
+        except ValueError:
+            return
+        wf  = self._vars['waveform_type'].get()
+        uc  = self._vars['up_chirp'].get()
+        extra = {}
+        for key, (var, dtype) in self._extra_vars.items():
+            raw = var.get()
+            try:
+                if dtype == 'int':   extra[key] = int(raw)
+                elif dtype == 'float': extra[key] = float(raw)
+                else:                extra[key] = raw
+            except ValueError:
+                pass
+        bank = {'waveform_type': wf, 'n_channels': n,
+                'spacing_mhz': sp, 'bw_mhz': bw,
+                'up_chirp': uc, 'extra': extra}
+        self._channel_banks.append(bank)
+        self._refresh_bank_tree()
+
+    def _remove_bank(self):
+        sel = self._bank_tree.selection()
+        if not sel:
+            return
+        idx = self._bank_tree.index(sel[0])
+        if idx < len(self._channel_banks):
+            self._channel_banks.pop(idx)
+        self._refresh_bank_tree()
+
+    def _refresh_bank_tree(self):
+        for item in self._bank_tree.get_children():
+            self._bank_tree.delete(item)
+        for bank in self._channel_banks:
+            extra_str = ', '.join(f'{k}={v}' for k, v in bank['extra'].items())
+            self._bank_tree.insert('', 'end', values=(
+                bank['waveform_type'],
+                bank['n_channels'],
+                bank['spacing_mhz'],
+                bank['bw_mhz'],
+                'Yes' if bank['up_chirp'] else 'No',
+                extra_str or '—',
+            ))
+
     def _on_type_change(self, _event=None):
         self._refresh_extra_fields(self._vars['waveform_type'].get())
 
@@ -1362,11 +1852,16 @@ class WaveformGUI:
             use_random_phase = p['use_random_phase'],
             rng_seed         = p['rng_seed'],
             use_amp_taper    = p['use_amp_taper'],
+            taper_type       = p['taper_type'],
+            taylor_nbar      = p['taylor_nbar'],
+            taylor_sll       = p['taylor_sll'],
             final_peak_scale = p['peak_scale'],
             base_file_name   = os.path.join(p['out_dir'], p['file_name']),
             save_mat         = p['save_mat'],
             save_csv         = p['save_csv'],
             save_bin         = p['save_bin'],
+            save_vsa89600    = p['save_vsa89600'],
+            save_m_script    = p['save_m_script'],
         )
 
         channels = self._build_channels(p)
@@ -1393,8 +1888,11 @@ class WaveformGUI:
             'tukey_alpha':     flt('tukey_alpha',  'Tukey alpha'),
             'peak_scale':      flt('peak_scale',   'Peak scale'),
             'rng_seed':        integer('rng_seed', 'RNG seed'),
+            'taylor_nbar':     integer('taylor_nbar', 'Taylor nbar'),
+            'taylor_sll':      flt('taylor_sll',   'Taylor SLL'),
             'waveform_type':   self._vars['waveform_type'].get(),
             'window_type':     self._vars['window_type'].get(),
+            'taper_type':      self._vars['taper_type'].get(),
             'up_chirp':        self._vars['up_chirp'].get(),
             'use_window':      self._vars['use_window'].get(),
             'use_random_phase':self._vars['use_random_phase'].get(),
@@ -1402,6 +1900,8 @@ class WaveformGUI:
             'save_mat':        self._vars['save_mat'].get(),
             'save_csv':        self._vars['save_csv'].get(),
             'save_bin':        self._vars['save_bin'].get(),
+            'save_vsa89600':   self._vars['save_vsa89600'].get(),
+            'save_m_script':   self._vars['save_m_script'].get(),
             'show_plots':      self._vars['show_plots'].get(),
             'out_dir':         self._vars['out_dir'].get(),
             'file_name':       self._vars['file_name'].get(),
@@ -1417,13 +1917,21 @@ class WaveformGUI:
         if p['max_bin_mb'] < 0:
             raise ValueError('Max BIN size must be 0 (no limit) or a positive number.')
 
-        # Instrument bandwidth check
+        # Instrument bandwidth check — computed over ALL banks
         instr_name = self._vars['instrument'].get()
         profile    = self.INSTRUMENT_PROFILES.get(instr_name, {})
         max_bw     = profile.get('max_bw_hz')
         max_fs     = profile.get('max_fs_hz')
-        occupied   = max(0, (p['n_channels'] - 1) * p['spacing_mhz'] * 1e6
-                           + p['bw_mhz'] * 1e6)
+
+        if self._channel_banks:
+            occupied = max(
+                0,
+                max((b['n_channels'] - 1) * b['spacing_mhz'] * 1e6
+                    + b['bw_mhz'] * 1e6
+                    for b in self._channel_banks)
+            )
+        else:
+            occupied = 0.0
         p['instrument']  = instr_name
         p['max_bw_hz']   = max_bw
         p['occupied_hz'] = occupied
@@ -1433,14 +1941,13 @@ class WaveformGUI:
             raise ValueError(
                 f'Occupied bandwidth {occupied/1e6:.1f} MHz exceeds '
                 f'{instr_name} limit of {max_bw/1e6:.0f} MHz '
-                f'(by {over:.1f} MHz).\n\n'
-                f'Reduce channels, spacing, or per-channel bandwidth.')
+                f'(by {over:.1f} MHz).\n\nReduce channels, spacing, or per-channel bandwidth.')
         if max_fs and p['fs_mhz'] * 1e6 > max_fs:
             raise ValueError(
                 f'Sample rate {p["fs_mhz"]:.1f} MHz exceeds '
                 f'{instr_name} ARB clock maximum of {max_fs/1e6:.0f} MHz.')
 
-        # Extra type-specific fields
+        # Extra type-specific fields (for the "new bank" entry form preview)
         p['extra'] = {}
         for key, (var, dtype) in self._extra_vars.items():
             raw = var.get()
@@ -1453,36 +1960,46 @@ class WaveformGUI:
         return p
 
     def _build_channels(self, p: dict) -> List[ChannelConfig]:
-        """Create a uniform channel bank from GUI parameters."""
-        wf   = WaveformType[p['waveform_type']]
-        n    = p['n_channels']
-        sp   = p['spacing_mhz'] * 1e6
-        bw   = p['bw_mhz'] * 1e6
-        extra = p['extra']
+        """
+        Build the full channel list from all defined channel banks.
+        Each bank is a uniform group of one waveform type; banks are
+        combined into a single flat list passed to CompositeBuilder.
+        """
+        if not self._channel_banks:
+            raise ValueError('No channel banks defined. '
+                             'Add at least one bank on the Channels tab.')
+        all_channels: List[ChannelConfig] = []
+        for bank in self._channel_banks:
+            all_channels.extend(self._bank_to_channels(bank))
+        return all_channels
+
+    @staticmethod
+    def _bank_to_channels(bank: dict) -> List[ChannelConfig]:
+        """Convert one bank descriptor dict into a list of ChannelConfig objects."""
+        wf    = WaveformType[bank['waveform_type']]
+        n     = bank['n_channels']
+        sp    = bank['spacing_mhz'] * 1e6
+        bw    = bank['bw_mhz'] * 1e6
+        extra = bank.get('extra', {})
+        uc    = bank.get('up_chirp', True)
 
         offsets = (np.arange(n) - (n - 1) / 2) * sp
-
-        # Build base params dict
-        params: dict = {'bandwidth_hz': bw, 'up_chirp': p['up_chirp']}
+        params: dict = {'bandwidth_hz': bw, 'up_chirp': uc}
 
         if wf == WaveformType.NLFM:
             params['law']  = extra.get('law', 'tangent')
-            params['beta'] = extra.get('beta', 1.8)
-
+            params['beta'] = float(extra.get('beta', 1.8))
         elif wf == WaveformType.FMCW:
             params['shape'] = extra.get('shape', 'sawtooth')
-
         elif wf == WaveformType.STEPPED:
-            params['n_steps'] = extra.get('n_steps', 8)
-            # bandwidth_hz here means total stepped span
+            params['n_steps'] = int(extra.get('n_steps', 8))
         elif wf == WaveformType.BPSK:
-            cr = extra.get('chip_rate_mhz', 1.0) * 1e6
-            params = {'code': [1,1,1,1,1,-1,-1,1,1,-1,1,-1,1],
+            cr = float(extra.get('chip_rate_mhz', 1.0)) * 1e6
+            params = {'code': [1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1],
                       'chip_rate_hz': cr}
         elif wf == WaveformType.FRANK:
-            cr = extra.get('chip_rate_mhz', 2.0) * 1e6
-            params = {'order': extra.get('order', 4), 'chip_rate_hz': cr}
-
+            cr = float(extra.get('chip_rate_mhz', 2.0)) * 1e6
+            params = {'order': int(extra.get('order', 4)), 'chip_rate_hz': cr}
         elif wf == WaveformType.CW:
             params = {}
 
